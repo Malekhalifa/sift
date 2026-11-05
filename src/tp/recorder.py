@@ -24,7 +24,11 @@ log = logging.getLogger("tp.recorder")
 ET = ZoneInfo("America/New_York")
 
 # Order matters: daily bars are fast and unblock the split/validation checks first.
-SPECS: tuple[tuple[str, str], ...] = (("sip", "1Day"), ("sip", "1Min"), ("iex", "1Min"))
+SPECS: tuple[tuple[str, str], ...] = (("sip", "1Day"), ("sip", "1Min"), ("iex", "1Min"), ("sip", "5Min"))
+# Which bar types each universe records. 5-minute SIP bars match 1-minute bars resampled to 5 minutes exactly,
+# so the wide universe skips the 1-minute and IEX history, which is roughly 10x more data.
+CORE_SPECS = (("sip", "1Day"), ("sip", "1Min"), ("iex", "1Min"))
+WIDE_SPECS = (("sip", "1Day"), ("sip", "5Min"))
 FEED_START = {"sip": date(2016, 1, 1), "iex": date(2020, 7, 27)}
 OVERLAP = timedelta(days=3)
 # Free tier withholds the newest 15 min of SIP data. IEX is real time, but skip the minute in progress.
@@ -71,16 +75,33 @@ def parse_specs(text: str | None) -> list[tuple[str, str]]:
     return specs  # type: ignore[return-value]
 
 
+def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """(feed, timeframe, symbol) triples to sync, in SPECS order. `symbols` restricts to those names."""
+    core, wide = config.core_symbols(), config.wide_symbols()
+    pool = {"core": core, "wide": wide, "all": [*core, *[s for s in wide if s not in core]]}[universe]
+    if symbols:
+        pool = symbols
+    plan = []
+    for feed, tf in specs:
+        for sym in pool:
+            allowed = CORE_SPECS if sym in core else WIDE_SPECS
+            if (feed, tf) in allowed:
+                plan.append((feed, tf, sym))
+    return plan
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--symbols", help="comma-separated; default is the whole universe")
+    ap.add_argument("--symbols", help="comma-separated; default is the chosen universe")
+    ap.add_argument("--universe", choices=["core", "wide", "all"], default="all")
     ap.add_argument("--specs", help="comma-separated feed:timeframe; default is all")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per request drowns the progress log
 
-    symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else config.all_symbols()
-    specs = parse_specs(args.specs)
+    symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
+    plan = build_plan(symbols, args.universe, parse_specs(args.specs))
+    all_names = sorted({sym for _, _, sym in plan})
 
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock = open(config.DATA_DIR / ".recorder.lock", "w")  # noqa: SIM115 - held for the whole run
@@ -93,23 +114,20 @@ def main(argv: list[str] | None = None) -> int:
     client = AlpacaClient(config.Settings.from_env())
     now = datetime.now(UTC)
 
-    splits = corp_actions.sync_splits(client, symbols, FEED_START["sip"], now.astimezone(ET).date())
-    log.info("splits synced: %d records for %d symbols", len(splits), len(symbols))
+    splits = corp_actions.sync_splits(client, all_names, FEED_START["sip"], now.astimezone(ET).date())
+    log.info("splits synced: %d records for %d symbols", len(splits), len(all_names))
 
-    total = len(specs) * len(symbols)
+    total = len(plan)
     failures: list[str] = []
-    done = 0
-    for feed, timeframe in specs:
-        for symbol in symbols:
-            done += 1
-            t0 = _time.monotonic()
-            try:
-                added = sync_series(client, feed, timeframe, symbol, now)
-            except AlpacaError as e:
-                failures.append(f"{feed}/{timeframe}/{symbol}: {e}")
-                log.error("[%d/%d] %s %s %s FAILED: %s", done, total, feed, timeframe, symbol, e)
-                continue
-            log.info("[%d/%d] %s %s %s +%d bars (%.1fs)", done, total, feed, timeframe, symbol, added, _time.monotonic() - t0)
+    for done, (feed, timeframe, symbol) in enumerate(plan, 1):
+        t0 = _time.monotonic()
+        try:
+            added = sync_series(client, feed, timeframe, symbol, now)
+        except AlpacaError as e:
+            failures.append(f"{feed}/{timeframe}/{symbol}: {e}")
+            log.error("[%d/%d] %s %s %s FAILED: %s", done, total, feed, timeframe, symbol, e)
+            continue
+        log.info("[%d/%d] %s %s %s +%d bars (%.1fs)", done, total, feed, timeframe, symbol, added, _time.monotonic() - t0)
 
     if failures:
         log.error("%d series failed:\n  %s", len(failures), "\n  ".join(failures))

@@ -39,3 +39,17 @@ def load_universe() -> dict:
 def all_symbols() -> list[str]:
     u = load_universe()["universe"]
     return list(dict.fromkeys([*u["traded"], *u["regime"]]))
+
+
+def core_symbols() -> list[str]:
+    """The first universe plus the regime references: every bar type is recorded for these."""
+    return all_symbols()
+
+
+def wide_symbols() -> list[str]:
+    """Second universe (scripts/select_universe.py): only 5-minute and daily bars are recorded."""
+    path = ROOT / "config" / "universe_wide.toml"
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        return list(tomllib.load(f)["universe"]["wide"])

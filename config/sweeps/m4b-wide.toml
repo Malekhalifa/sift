@@ -1,0 +1,18 @@
+# M4b pre-registered sweep: the SAME breakout grid as m4-v1, on a different, wider universe.
+# Frozen when committed. Changing any value means a new name; trials already logged keep counting.
+name = "m4b-wide-v1"
+universe = "wide"                  # config/universe_wide.toml: top 50 by Q1-2016 dollar volume
+bar_timeframe = "5Min"             # SIP 5-minute bars, identical to 1-minute bars resampled (checked)
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 200
+slippage = 0.01                    # $ per share, as-traded, each market fill
+stress_slippage = 0.02             # the 2x cost check
+
+[orb.grid]                          # 3 x 3 x 2 x (1 + 2) = 54 configurations, unchanged from m4-v1
+or_minutes = [5, 15, 30]
+rvol_min = [0.0, 1.5, 2.0]
+gap_align = [false, true]
+stop_mode = ["or_opposite", "atr"]
+atr_mult = [0.1, 0.25]

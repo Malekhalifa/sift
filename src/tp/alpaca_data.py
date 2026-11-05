@@ -91,6 +91,36 @@ class AlpacaClient:
                 return
             params["page_token"] = token
 
+    def multi_bars(
+        self,
+        symbols: Sequence[str],
+        timeframe: str,
+        start: datetime | date,
+        end: datetime | date,
+        feed: str = "sip",
+        adjustment: str = "raw",
+        limit: int = 10_000,
+    ) -> Iterator[tuple[str, dict]]:
+        """Yield (symbol, bar) for many symbols in one paginated request. Keep len(symbols) x bars-per-symbol
+        under `limit` per page or pagination takes over."""
+        fmt = (lambda d: _iso(d)) if isinstance(start, datetime) else (lambda d: d.isoformat())
+        params = {
+            "symbols": ",".join(symbols), "timeframe": timeframe, "start": fmt(start), "end": fmt(end),
+            "feed": feed, "adjustment": adjustment, "limit": limit, "sort": "asc",
+        }
+        while True:
+            payload = self._get(f"{DATA_URL}/v2/stocks/bars", params)
+            for sym, bars in (payload.get("bars") or {}).items():
+                for bar in bars:
+                    yield sym, bar
+            token = payload.get("next_page_token")
+            if not token:
+                return
+            params["page_token"] = token
+
+    def assets(self) -> list[dict]:
+        return self._get(f"{PAPER_URL}/v2/assets", {"status": "active", "asset_class": "us_equity"})
+
     def splits(self, symbols: Sequence[str], start: date, end: date) -> Iterator[dict]:
         """Yield forward/reverse split records (symbol, ex_date, new_rate, old_rate)."""
         params = {

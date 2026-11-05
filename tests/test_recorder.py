@@ -67,3 +67,19 @@ def test_sync_series_refetches_missing_past_year(monkeypatch):
     recorder.sync_series(client, "sip", "1Min", "AAA", now)
     assert len(client.calls) == 2  # missing 2024 plus the current-year overlap
     assert 2024 in store.stored_years("sip", "1Min", "AAA")
+
+
+def test_build_plan_gives_each_universe_its_own_bar_types(monkeypatch):
+    from tp import config
+
+    monkeypatch.setattr(config, "core_symbols", lambda: ["AAA", "SPY"])
+    monkeypatch.setattr(config, "wide_symbols", lambda: ["WIDE1", "WIDE2"])
+    everything = list(recorder.SPECS)
+    plan = recorder.build_plan(None, "all", everything)
+    assert ("sip", "1Min", "AAA") in plan and ("iex", "1Min", "AAA") in plan
+    assert ("sip", "5Min", "WIDE1") in plan and ("sip", "1Day", "WIDE2") in plan
+    assert ("sip", "1Min", "WIDE1") not in plan and ("iex", "1Min", "WIDE1") not in plan  # wide skips 1-minute data
+    assert ("sip", "5Min", "AAA") not in plan  # core derives 5-minute bars from 1-minute data
+    assert plan.index(("sip", "1Day", "AAA")) < plan.index(("sip", "1Min", "AAA"))  # spec order kept
+    assert {s for *_, s in recorder.build_plan(None, "wide", everything)} == {"WIDE1", "WIDE2"}
+    assert recorder.build_plan(["WIDE2"], "all", [("sip", "5Min")]) == [("sip", "5Min", "WIDE2")]

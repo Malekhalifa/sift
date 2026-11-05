@@ -40,11 +40,12 @@ MIN_NEIGHBOR_SHARE = 0.7
 
 
 class Data:
-    def __init__(self, symbols: list[str], start: date, end: date):
+    def __init__(self, symbols: list[str], start: date, end: date, bar_timeframe: str = "1Min"):
         lo, hi = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end + timedelta(days=1), tz="UTC")
         self.frames, self.prepared, self.daily = {}, {}, {}
         for sym in symbols:
-            bars = load_bars(sym, "sip", "1Min", lo, hi, rth=True, resample="5min")
+            # 5-minute bars are stored directly for the wide universe, or resampled from 1-minute bars
+            bars = load_bars(sym, "sip", bar_timeframe, lo, hi, rth=True, resample="5min" if bar_timeframe == "1Min" else None)
             self.frames[sym] = bars
             self.prepared[sym] = bt.PreparedBars.from_frame(bars, 5, split_factor(bars.index, load_splits(sym)))
             self.daily[sym] = load_bars(sym, "sip", "1Day")
@@ -53,15 +54,15 @@ class Data:
         self.sessions = [pd.Timestamp(year=d // 10_000, month=d // 100 % 100, day=d % 100) for d in days]
 
 
-def coverage_problems(symbols: list[str], start: date, end: date) -> list[str]:
+def coverage_problems(symbols: list[str], start: date, end: date, timeframe: str = "1Min") -> list[str]:
     problems = []
     for sym in symbols:
-        years = set(store.stored_years("sip", "1Min", sym))
-        last = store.last_ts("sip", "1Min", sym)
+        years = set(store.stored_years("sip", timeframe, sym))
+        last = store.last_ts("sip", timeframe, sym)
         if not set(range(start.year, end.year + 1)) <= years:
-            problems.append(f"{sym}: sip/1Min missing years {sorted(set(range(start.year, end.year + 1)) - years)}")
+            problems.append(f"{sym}: sip/{timeframe} missing years {sorted(set(range(start.year, end.year + 1)) - years)}")
         elif last is None or last.date() < end - timedelta(days=10):
-            problems.append(f"{sym}: sip/1Min ends {last}")
+            problems.append(f"{sym}: sip/{timeframe} ends {last}")
     return problems
 
 
@@ -238,8 +239,14 @@ def main() -> int:
     if end >= config.HOLDOUT_START:
         print(f"period_end {end} reaches the holdout ({config.HOLDOUT_START}); refusing.", file=sys.stderr)
         return 2
-    symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else config.load_universe()["universe"]["traded"]
-    problems = coverage_problems(symbols + ["SPY"], start, end)
+    timeframe = cfg.get("bar_timeframe", "1Min")
+    if args.symbols:
+        symbols = [s.strip().upper() for s in args.symbols.split(",")]
+    elif cfg.get("universe", "traded") == "wide":
+        symbols = config.wide_symbols()
+    else:
+        symbols = config.load_universe()["universe"]["traded"]
+    problems = coverage_problems(symbols, start, end, timeframe) + coverage_problems(["SPY"], start, end, "1Day")
     if problems and not args.allow_partial:
         print("Incomplete data; finish the backfill first (or --allow-partial for a dev run):\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1
@@ -252,7 +259,7 @@ def main() -> int:
     families = [f for f in families if f in cfg]
 
     print(f"Loading {len(symbols)} symbols...", file=sys.stderr)
-    data = Data(symbols, start, end)
+    data = Data(symbols, start, end, timeframe)
     cost, risk = bt.CostModel(slippage=cfg["slippage"]), bt.RiskConfig()
 
     if args.time_only:
