@@ -1,0 +1,20 @@
+# M7 pre-registered sweep: earnings-announcement drift on daily bars, 150-stock universe.
+# Frozen when committed. Changing any value means a new name; trials already logged keep counting.
+name = "m7-events-v1"
+engine = "swing"
+universe = "events"                # config/universe_events.toml: top 150 by Q1-2016 dollar volume, excluding the first 10
+bar_timeframe = "1Day"             # SIP daily bars, split-adjusted
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 200
+slippage = 0.01                    # $ per share, as-traded, each market fill
+stress_slippage = 0.02             # the 2x cost check
+max_positions = 10                 # portfolio view only; the pass criteria use every simulated trade
+regime_check = false
+
+[ead.grid]                          # 2 x 3 x 2 x 3 = 36 configurations
+mode = ["drift", "fade"]
+thr_atr = [1.0, 2.0, 3.0]
+stop_atr = [1.5, 3.0]
+max_hold = [5, 10, 20]

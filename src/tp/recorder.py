@@ -31,6 +31,7 @@ SPECS: tuple[tuple[str, str], ...] = (("sip", "1Day"), ("sip", "1Min"), ("iex", 
 # so the wide universe skips the 1-minute and IEX history, which is roughly 10x more data.
 CORE_SPECS = (("sip", "1Day"), ("sip", "1Min"), ("iex", "1Min"))
 WIDE_SPECS = (("sip", "1Day"), ("sip", "5Min"))
+DAILY_SPECS = (("sip", "1Day"),)  # symbols that exist only for event studies
 FEED_START = {"sip": date(2016, 1, 1), "iex": date(2020, 7, 27)}
 OVERLAP = timedelta(days=3)
 # Free tier withholds the newest 15 min of SIP data. IEX is real time, but skip the minute in progress.
@@ -105,14 +106,15 @@ def run_plan(client: AlpacaClient, plan: list[tuple[str, str, str]], now: dateti
 
 def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
     """(feed, timeframe, symbol) triples to sync, in SPECS order. `symbols` restricts to those names."""
-    core, wide = config.core_symbols(), config.wide_symbols()
-    pool = {"core": core, "wide": wide, "all": [*core, *[s for s in wide if s not in core]]}[universe]
+    core, wide, events = config.core_symbols(), config.wide_symbols(), config.events_symbols()
+    everyone = list(dict.fromkeys([*core, *wide, *events]))
+    pool = {"core": core, "wide": wide, "events": events, "all": everyone}[universe]
     if symbols:
         pool = symbols
     plan = []
     for feed, tf in specs:
         for sym in pool:
-            allowed = CORE_SPECS if sym in core else WIDE_SPECS
+            allowed = CORE_SPECS if sym in core else WIDE_SPECS if sym in wide else DAILY_SPECS
             if (feed, tf) in allowed:
                 plan.append((feed, tf, sym))
     return plan
@@ -121,7 +123,7 @@ def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--symbols", help="comma-separated; default is the chosen universe")
-    ap.add_argument("--universe", choices=["core", "wide", "all"], default="all")
+    ap.add_argument("--universe", choices=["core", "wide", "events", "all"], default="all")
     ap.add_argument("--specs", help="comma-separated feed:timeframe; default is all")
     ap.add_argument("--workers", type=int, default=1, help="parallel series (all share one request-rate budget)")
     args = ap.parse_args(argv)

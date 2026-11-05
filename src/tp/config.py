@@ -53,3 +53,12 @@ def wide_symbols() -> list[str]:
         return []
     with open(path, "rb") as f:
         return list(tomllib.load(f)["universe"]["wide"])
+
+
+def events_symbols() -> list[str]:
+    """Third universe (scripts/select_universe.py --n 150 --key events): daily bars only, used for event studies."""
+    path = ROOT / "config" / "universe_events.toml"
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        return list(tomllib.load(f)["universe"]["events"])

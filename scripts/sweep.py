@@ -248,6 +248,8 @@ def main() -> int:
         symbols = [s.strip().upper() for s in args.symbols.split(",")]
     elif cfg.get("universe", "traded") == "wide":
         symbols = config.wide_symbols()
+    elif cfg.get("universe") == "events":
+        symbols = config.events_symbols()
     else:
         symbols = config.load_universe()["universe"]["traded"]
     problems = coverage_problems(symbols, start, end, timeframe) + coverage_problems(["SPY"], start, end, "1Day")
