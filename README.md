@@ -16,6 +16,7 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M4 opening-range filters, failed-breakout fade, walk-forward sweep | done: no strategy passed, see [docs/m4-results.md](docs/m4-results.md) |
 | M4b breakout on a wider universe (50 stocks) | done: failed, significantly negative, see [docs/m4b-results.md](docs/m4b-results.md) |
 | M6 daily-bar swing (RSI(2) reversion, 20/200 pullback) | done: failed, significantly negative, see [docs/m6-results.md](docs/m6-results.md) |
+| M7 earnings-announcement drift (150 stocks, SEC filing times) | done: passes 5 of 6, fails Deflated Sharpe, not eligible; about half the raw gain is market drift, see [docs/m7-results.md](docs/m7-results.md) |
 | M5 paper loop on Alpaca | plumbing done and tested, not scheduled; nothing to run for evidence until a strategy passes |
 
 ## Setup
