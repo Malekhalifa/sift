@@ -11,10 +11,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-import numpy as np
 import pandas as pd
 
-from tp import events, features
+from tp import events
 from tp.backtest import Signal
 from tp.swing import decision_ts
 
@@ -56,34 +55,21 @@ class EarningsDrift:
         if spy_daily is None or spy_daily.empty:
             raise ValueError("the earnings strategy needs SPY daily bars to market-adjust the reaction")
         p = self.params
-        filed = events.load_earnings(symbol)["filed_at"]
-        react = events.reaction_positions(filed, bars.index)
-        if react.empty:
+        table = events.reaction_table(bars, spy_daily, events.load_earnings(symbol)["filed_at"], p.atr_n)
+        if table.empty:
             return []
         close = bars["close"]
-        atr = features.atr_through(bars, p.atr_n)
-        atr_pct_before = (atr / close).shift(1)  # volatility known BEFORE the event session
-        spy_ret = spy_daily["close"].pct_change()
-        spy_ret.index = features.session_dates(spy_daily.index)
-        stock_ret = close.pct_change()
         when = decision_ts(bars.index)
-        dates = features.session_dates(bars.index)
         signals = []
-        for r in react["pos"]:
-            market = spy_ret.get(dates[r], np.nan)
-            ar = stock_ret.iloc[r] - market
-            vol = atr_pct_before.iloc[r]
-            if not np.isfinite(ar) or not np.isfinite(vol) or vol <= 0 or not np.isfinite(atr.iloc[r]):
+        for row in table.itertuples():
+            if abs(row.z) < p.thr_atr:
                 continue
-            z = ar / vol
-            if abs(z) < p.thr_atr:
-                continue
-            long = (z > 0) == (p.mode == "drift")
+            long = (row.z > 0) == (p.mode == "drift")
             if p.sides != "both" and (p.sides == "long") != long:
                 continue
-            entry = float(close.iloc[r])
-            stop = entry - p.stop_atr * float(atr.iloc[r]) if long else entry + p.stop_atr * float(atr.iloc[r])
+            entry = float(close.iloc[row.pos])
+            stop = entry - p.stop_atr * row.atr if long else entry + p.stop_atr * row.atr
             if stop <= 0 or abs(entry - stop) < p.min_risk_pct * entry:
                 continue
-            signals.append(Signal.bracket(symbol, when[r], "long" if long else "short", entry, stop, p.rr, "ead", p.max_hold))
+            signals.append(Signal.bracket(symbol, when[row.pos], "long" if long else "short", entry, stop, p.rr, "ead", p.max_hold))
         return signals
