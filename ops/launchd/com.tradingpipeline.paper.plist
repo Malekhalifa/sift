@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template, NOT installed. Starts the paper loop each weekday at 14:00 local time (CET). That is 08:00 ET, or
+     09:00 ET in the weeks when US and EU daylight time differ, so always before the 09:30 open; the loop waits for
+     the open by itself and exits on holidays and weekends. It runs as a DRY RUN until the config says otherwise.
+     See README.md for install steps. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingpipeline.paper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>-m</string>
+        <string>tp.paper</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/m6l9k/.t3/projects/trading-pipeline</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/paper.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/paper.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

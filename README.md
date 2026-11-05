@@ -15,7 +15,7 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M3 backtest engine (signal -> bracket contract, costs, R-multiples) | done |
 | M4 opening-range filters, failed-breakout fade, walk-forward sweep | done: no strategy passed, see [docs/m4-results.md](docs/m4-results.md) |
 | M4b breakout on a wider universe (50 stocks) | done: failed, significantly negative, see [docs/m4b-results.md](docs/m4b-results.md) |
-| M5 paper loop on Alpaca | in progress (plumbing only: no strategy has passed) |
+| M5 paper loop on Alpaca | plumbing done and tested, not scheduled; nothing to run for evidence until a strategy passes |
 
 ## Setup
 
@@ -92,6 +92,39 @@ Unfiltered 5-minute ORB on AAPL, MSFT and NVDA, 2016-2024: expectancy +0.008R +-
 so no edge after costs, as expected before any filter. Zero slippage gives +0.024R and 3 cents gives -0.024R, so
 costs decide it. The first run (trial 1) is in the registry with a slippage-scaling bug that overstated
 costs on split-adjusted prices; trial 2 is the corrected run.
+
+## Paper trading (plumbing only)
+
+`tp.paper` runs the same strategy code as the backtest on live IEX bars and sends bracket orders to the Alpaca
+**paper** account. No strategy has passed the protocol, so `config/paper/plumbing.toml` is a **machinery test**:
+its trades are flagged `evidence = 0` and say nothing about any edge.
+
+```sh
+uv run python -m tp.paper --once      # one decision cycle on the current bar, then exit
+uv run python -m tp.paper             # the full loop; DRY RUN by default (logs, sends nothing)
+uv run python -m tp.paper --live      # sends orders to the paper account
+uv run python scripts/paper_report.py # decisions, fills, slippage vs the backtest's assumption
+touch data/KILL                       # kill switch: stops entries, flattens, exits (rm to re-arm)
+```
+
+How a cycle works: ~8 seconds after each 5-minute bar closes, it loads stored IEX history plus today's live bars,
+runs `strategy.generate()` and keeps only signals decided on the bar that just closed. Each goes through guards
+(kill file, daily loss cap, one position per symbol, max positions, max trades a day, no entries near flat time,
+skip a stock for 20 days after a split), then sizing (fixed fraction of equity at the stop, leverage cap), then a
+market order with an attached take-profit and stop-loss. Client order ids are deterministic, so a restart cannot
+double-submit. At 15:55 ET it cancels working orders and closes positions. Everything goes to `data/paper.sqlite`.
+
+What was verified, not just unit-tested:
+
+- Replaying 30 real sessions on 5 symbols bar by bar (`scripts/paper_replay_check.py`): 135 signals, 0 differences from the backtest.
+- Alpaca accepts our bracket format (`scripts/paper_smoke_order.py`, a limit order that cannot fill, placed and cancelled).
+- A real 1-share paper round trip through the runner: fill, attached legs, flatten, and the exit recorded as `flat`.
+
+Scheduling is a template, not installed: `ops/launchd/com.tradingpipeline.paper.plist` starts the loop on weekdays
+at 14:00 local time (always before the open) and exits on holidays.
+
+Free-feed caveat: live bars are IEX, which has gaps on quieter names (see the validator results). Names such as
+AVGO, NFLX and GOOGL would miss bars; the live universe should be restricted to well-covered tickers.
 
 ## M1 findings (AAPL, 2026-11-05)
 

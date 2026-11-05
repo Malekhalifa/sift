@@ -49,24 +49,29 @@ class AlpacaClient:
                 time.sleep(wait)
             self._last_request = time.monotonic()
 
-    def _get(self, url: str, params: dict | None = None) -> dict:
+    def _send(self, method: str, url: str, params: dict | None = None, body: dict | None = None) -> dict | list:
         last_error = "no attempt made"
         for attempt in range(MAX_ATTEMPTS):
             self._throttle()
             try:
-                r = self._http.get(url, params=params)
+                r = self._http.request(method, url, params=params, json=body)
             except httpx.TransportError as e:
                 last_error = f"transport error: {e!r}"
+                if method != "GET":  # a write may have reached the server: never blindly resend it
+                    raise AlpacaError(0, last_error) from e
                 time.sleep(2**attempt)
                 continue
-            if r.status_code == 429 or r.status_code >= 500:
+            if r.status_code == 429 or (r.status_code >= 500 and method == "GET"):
                 last_error = f"HTTP {r.status_code}: {r.text[:200]}"
                 time.sleep(float(r.headers.get("Retry-After", 2**attempt)))
                 continue
             if r.status_code >= 400:
                 raise AlpacaError(r.status_code, r.text[:300])
-            return r.json()
+            return r.json() if r.content else {}
         raise AlpacaError(0, f"gave up after {MAX_ATTEMPTS} attempts ({last_error})")
+
+    def _get(self, url: str, params: dict | None = None) -> dict:
+        return self._send("GET", url, params)
 
     def account(self) -> dict:
         return self._get(f"{PAPER_URL}/v2/account")
@@ -146,3 +151,35 @@ class AlpacaClient:
             if not token:
                 return
             params["page_token"] = token
+
+
+class TradingClient(AlpacaClient):
+    """Paper-trading calls. Only ever points at the paper API."""
+
+    def clock(self) -> dict:
+        return self._get(f"{PAPER_URL}/v2/clock")
+
+    def positions(self) -> list[dict]:
+        return self._get(f"{PAPER_URL}/v2/positions")
+
+    def orders(self, status: str = "open", after: str | None = None, limit: int = 500,
+               symbols: Sequence[str] | None = None, nested: bool = True) -> list[dict]:
+        """nested=True rolls bracket legs under their parent; nested=False lists every order flat."""
+        params = {"status": status, "limit": limit, "direction": "asc", "nested": str(nested).lower()}
+        if after:
+            params["after"] = after
+        if symbols:
+            params["symbols"] = ",".join(symbols)
+        return self._get(f"{PAPER_URL}/v2/orders", params)
+
+    def submit_order(self, body: dict) -> dict:
+        return self._send("POST", f"{PAPER_URL}/v2/orders", body=body)
+
+    def cancel_order(self, order_id: str) -> None:
+        self._send("DELETE", f"{PAPER_URL}/v2/orders/{order_id}")
+
+    def cancel_all_orders(self) -> None:
+        self._send("DELETE", f"{PAPER_URL}/v2/orders")
+
+    def close_position(self, symbol: str) -> dict:
+        return self._send("DELETE", f"{PAPER_URL}/v2/positions/{symbol}")

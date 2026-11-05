@@ -1,0 +1,18 @@
+# Machinery test, NOT a strategy under evaluation. No strategy has passed the protocol, so nothing here is
+# evidence of an edge. The baseline breakout is used only because it signals often enough to exercise the loop.
+[paper]
+strategy = "orb"
+symbols = ["AAPL", "MSFT", "NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL", "NFLX", "AVGO"]
+tag = "plumbing"
+evidence = false
+dry_run = true                 # flip to false only on purpose; orders go to the Alpaca PAPER account either way
+risk_per_trade = 0.0025
+max_positions = 3
+max_trades_per_day = 6
+max_leverage = 1.0
+daily_loss_cap_pct = 1.0
+flat_time = "15:55"
+
+[params]
+or_minutes = 5
+last_entry = "10:30"
