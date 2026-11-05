@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template, NOT installed. Daily incremental sync at 03:00 local time (CET = 21:00 ET, after the
+     20:00 ET extended session plus the 15 min SIP delay). If the Mac was asleep, launchd runs it on wake;
+     the recorder is idempotent and catches up on whatever was missed. See README.md for install steps. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingpipeline.recorder</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>-m</string>
+        <string>tp.recorder</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/m6l9k/.t3/projects/trading-pipeline</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/recorder.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/recorder.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

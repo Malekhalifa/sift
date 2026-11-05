@@ -1,0 +1,9 @@
+# M0 decisions: US stocks, liquid names only. Regime symbols are context, not traded.
+[universe]
+traded = ["AAPL", "MSFT", "NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL", "NFLX", "AVGO"]
+regime = ["SPY", "QQQ"]
+
+[session]
+timezone = "America/New_York"
+open = "09:30"
+close = "16:00"
