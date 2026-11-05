@@ -31,7 +31,7 @@ from tp.strategies import REGISTRY
 from tp.sweeps import expand_grid, load_sweep_file
 
 RAW_FIELDS = list(bt.RawTrade.__dataclass_fields__)
-JOINT_AXES = {"orb": (("stop_mode", "atr_mult"),), "fade": ()}
+JOINT_AXES = {"orb": (("stop_mode", "atr_mult"),)}  # families not listed have independent axes
 
 # Pass criteria, fixed in docs/m4-protocol.md before any sweep was run.
 MIN_OOS_TRADES = 300
@@ -156,7 +156,7 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
     modal = pd.Series([f.config_id for f in folds if f.config_id]).mode().iloc[-1]
     keys = list(cfg[family]["grid"])
     out["modal_config"] = {"id": modal, "params": params_by_id[modal]}
-    out["stability"] = wf.neighbor_stability(modal, params_by_id, keys, diag, JOINT_AXES[family])
+    out["stability"] = wf.neighbor_stability(modal, params_by_id, keys, diag, JOINT_AXES.get(family, ()))
     out["grid"] = {
         "configs": len(diag),
         "share_positive_oos": float((diag["oos_expectancy_R"] > 0).mean()),
