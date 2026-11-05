@@ -1,0 +1,22 @@
+# M4 pre-registered sweep. Frozen when committed: changing a value after results exist means a new
+# name, and the old trials stay in the registry and count against us (see docs/m4-protocol.md).
+name = "m4-v1"
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 200
+slippage = 0.01                    # $ per share, as-traded, each market fill
+stress_slippage = 0.02             # the 2x cost check
+
+[orb.grid]                          # 3 x 3 x 2 x (1 + 2) = 54 configurations
+or_minutes = [5, 15, 30]
+rvol_min = [0.0, 1.5, 2.0]
+gap_align = [false, true]
+stop_mode = ["or_opposite", "atr"]
+atr_mult = [0.1, 0.25]
+
+[fade.grid]                         # 3 x 2 x 2 x 2 = 24 configurations
+or_minutes = [5, 15, 30]
+rvol_min = [0.0, 1.5]
+max_per_day = [1, 3]
+max_risk_atr = [0.25, 0.5]

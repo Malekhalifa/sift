@@ -12,29 +12,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from datetime import date, timedelta
 
 import pandas as pd
 
 from tp import backtest as bt
 from tp import config, metrics, trials
+from tp.sweeps import parse_sets
 from tp.bars import load_bars, split_factor
 from tp.corp_actions import load_splits
 from tp.strategies import REGISTRY
 
 SWEEP_SLIPPAGE = (0.0, 0.005, 0.01, 0.02, 0.03)
-
-
-def parse_sets(items: list[str], params_cls) -> dict:
-    defaults = {f.name: f.default for f in fields(params_cls)}
-    out = {}
-    for item in items:
-        key, _, raw = item.partition("=")
-        if key not in defaults:
-            raise SystemExit(f"Unknown parameter {key!r}; choose from {sorted(defaults)}")
-        out[key] = type(defaults[key])(raw)
-    return out
 
 
 def utc_midnight(d: date) -> pd.Timestamp:
@@ -66,12 +56,13 @@ def main() -> int:
         return 2
 
     strategy_cls = REGISTRY[args.strategy]
-    overrides = parse_sets(args.set, type(strategy_cls().params))
+    overrides = parse_sets(args.set, strategy_cls.params_cls)
     strategy = strategy_cls(**overrides)
     symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else config.load_universe()["universe"]["traded"]
     start, end = utc_midnight(args.start), utc_midnight(args.end + timedelta(days=1))
     bar_minutes = strategy.params.bar_minutes
 
+    spy_daily = load_bars("SPY", feed="sip", timeframe="1Day") if strategy.params.trend_filter == "spy_sma" else None
     frames, prepared, signals = {}, {}, []
     for sym in symbols:
         bars = load_bars(sym, feed=args.feed, timeframe="1Min", start=start, end=end, rth=True, resample=f"{bar_minutes}min")
@@ -81,7 +72,7 @@ def main() -> int:
         daily = load_bars(sym, feed="sip", timeframe="1Day")
         frames[sym] = bars
         prepared[sym] = bt.PreparedBars.from_frame(bars, bar_minutes, split_factor(bars.index, load_splits(sym)))
-        signals += strategy.generate(sym, bars, daily)
+        signals += strategy.generate(sym, bars, daily, spy_daily)
         print(f"  {sym}: {len(bars):,} bars, {bars.index[0].date()} -> {bars.index[-1].date()}", file=sys.stderr)
     if not prepared:
         print("No data loaded. Run the recorder first.", file=sys.stderr)

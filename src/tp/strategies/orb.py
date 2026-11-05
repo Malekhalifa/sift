@@ -1,8 +1,8 @@
-"""Opening-range breakout (baseline, no filters yet).
+"""Opening-range breakout.
 
-The opening range is the high/low of the first `or_minutes` of the regular session. The first 5-minute bar
-that CLOSES outside it gives the signal (wicks do not count). One signal per symbol per day.
-Filters (relative volume, gap, regime) and the failed-breakout fade are M4.
+The opening range is the high/low of the first `or_minutes` of the regular session. The first bar that CLOSES
+outside it gives the signal (wicks do not count). One signal per symbol per day, taken only if the day passes
+the shared filters (relative volume, gap, trend) at the moment the breakout bar closes.
 """
 
 from __future__ import annotations
@@ -16,10 +16,11 @@ import pandas as pd
 from tp import features
 from tp.backtest import Signal
 from tp.bars import ET
+from tp.filters import FilterParams, SessionContext
 
 
 @dataclass(frozen=True)
-class ORBParams:
+class ORBParams(FilterParams):
     or_minutes: int = 5
     rr: float = 1.5
     stop_mode: str = "or_opposite"  # "or_opposite" = other side of the range, "atr" = atr_mult x daily ATR(14)
@@ -32,6 +33,7 @@ class ORBParams:
 
 class OpeningRangeBreakout:
     name = "orb"
+    params_cls = ORBParams
 
     def __init__(self, **overrides):
         self.params = ORBParams(**overrides)
@@ -46,13 +48,28 @@ class OpeningRangeBreakout:
     def params_dict(self) -> dict:
         return asdict(self.params)
 
-    def generate(self, symbol: str, bars: pd.DataFrame, daily: pd.DataFrame | None = None) -> list[Signal]:
+    @staticmethod
+    def canonical(overrides: dict) -> dict:
+        """Drop parameters that cannot change the result, so equivalent grid points dedupe."""
+        out = dict(overrides)
+        if out.get("stop_mode", "or_opposite") == "or_opposite":
+            out.pop("atr_mult", None)
+        return out
+
+    def generate(
+        self,
+        symbol: str,
+        bars: pd.DataFrame,
+        daily: pd.DataFrame | None = None,
+        spy_daily: pd.DataFrame | None = None,
+    ) -> list[Signal]:
         """bars: regular-hours bars at `bar_minutes` resolution, UTC index of bar opens, split-adjusted."""
         p = self.params
         bar = pd.Timedelta(minutes=p.bar_minutes)
         or_bars = p.or_minutes // p.bar_minutes
         last_entry = time.fromisoformat(p.last_entry)
         atr = features.daily_atr(daily) if p.stop_mode == "atr" and daily is not None else None
+        ctx = SessionContext(bars, daily, spy_daily, p)
 
         local = bars.index.tz_convert(ET)
         day_key = np.asarray(local.year * 10_000 + local.month * 100 + local.day)
@@ -77,13 +94,17 @@ class OpeningRangeBreakout:
             k = int(k_up if long else k_dn)
 
             ts = rest.index[k] + bar  # decision time: the breakout bar has just closed
-            if ts.tz_convert(ET).time() > last_entry:
+            ts_local = ts.tz_convert(ET)
+            if ts_local.time() > last_entry:
+                continue
+            day_ts = pd.Timestamp(ts_local.date())
+            side = "long" if long else "short"
+            if not ctx.allows(side, day_ts, int(mod[pos[or_bars + k]])):
                 continue
             entry_ref = float(close[k])
             if p.stop_mode == "or_opposite":
                 stop = float(or_low if long else or_high)
             else:
-                day_ts = pd.Timestamp(ts.tz_convert(ET).date())
                 a = atr.get(day_ts, np.nan) if atr is not None else np.nan
                 if not np.isfinite(a):
                     continue
@@ -92,5 +113,5 @@ class OpeningRangeBreakout:
             wrong_side = stop >= entry_ref if long else stop <= entry_ref
             if wrong_side or risk < p.min_risk_pct * entry_ref:
                 continue
-            signals.append(Signal.bracket(symbol, ts, "long" if long else "short", entry_ref, stop, p.rr, tag="orb"))
+            signals.append(Signal.bracket(symbol, ts, side, entry_ref, stop, p.rr, tag="orb"))
         return signals
