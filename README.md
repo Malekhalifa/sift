@@ -18,6 +18,7 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M6 daily-bar swing (RSI(2) reversion, 20/200 pullback) | done: failed, significantly negative, see [docs/m6-results.md](docs/m6-results.md) |
 | M7 earnings-announcement drift (150 stocks, SEC filing times) | done: passes 5 of 6, fails Deflated Sharpe, not eligible; about half the raw gain is market drift, see [docs/m7-results.md](docs/m7-results.md) |
 | M8 confirm the earnings-drift setting on 250 unseen stocks | done: did not replicate (+0.025R +-0.077), the lead is closed, see [docs/m8-results.md](docs/m8-results.md) |
+| M9 original indicator strategies (UT Bot + STC, Supertrend + Waddah) | done: failed, clearly negative (-0.04R +-0.005), see [docs/m9-results.md](docs/m9-results.md) |
 | M5 paper loop on Alpaca | plumbing done and tested, not scheduled; nothing to run for evidence until a strategy passes |
 
 ## Setup
