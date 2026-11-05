@@ -253,6 +253,12 @@ def main() -> int:
     else:
         symbols = config.load_universe()["universe"]["traded"]
     problems = coverage_problems(symbols, start, end, timeframe) + coverage_problems(["SPY"], start, end, "1Day")
+    if cfg.get("drop_incomplete"):  # data hygiene, decided in the protocol: drop symbols that lack the full period
+        dropped = [p.split(":")[0] for p in problems if not p.startswith("SPY")]
+        if dropped:
+            print(f"Dropping {len(dropped)} symbol(s) with incomplete history (per config): {dropped}", file=sys.stderr)
+        problems = [p for p in problems if p.startswith("SPY")]
+        symbols = [s for s in symbols if s not in dropped]
     if problems and not args.allow_partial:
         print("Incomplete data; finish the backfill first (or --allow-partial for a dev run):\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1

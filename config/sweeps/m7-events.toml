@@ -12,6 +12,7 @@ slippage = 0.01                    # $ per share, as-traded, each market fill
 stress_slippage = 0.02             # the 2x cost check
 max_positions = 10                 # portfolio view only; the pass criteria use every simulated trade
 regime_check = false
+drop_incomplete = true            # symbols whose daily history does not cover the whole period are dropped (data hygiene)
 
 [ead.grid]                          # 2 x 3 x 2 x 3 = 36 configurations
 mode = ["drift", "fade"]

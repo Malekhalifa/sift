@@ -46,6 +46,13 @@ rule as the 50-stock universe, which is the first 50 of this list (`config/unive
 `scripts/select_universe.py`). Daily SIP bars from 2016, SPY for the market adjustment, earnings times from SEC
 EDGAR. About 36 events per stock gives roughly 5,000 events before filtering.
 
+## Data hygiene (added before any M7 result existed)
+
+Symbols whose daily history does not cover the whole 2016-2024 period are dropped, because the universe was ranked
+on 2016 liquidity and a few tickers were reused after a delisting (found so far: APC, Anadarko, acquired in 2019).
+Foreign filers such as BP and BIDU file no 8-K earnings releases and so produce no events. Neither rule looks at
+returns. Both were decided after the earnings data arrived and before any sweep or event-study output was seen.
+
 ## Unchanged
 
 Development period 2016-01-04 to 2024-12-31, **2025+ holdout untouched**, test years 2019-2024, walk-forward

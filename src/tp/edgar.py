@@ -15,10 +15,17 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
+from dotenv import load_dotenv
 
 from tp import config
 
-USER_AGENT = os.environ.get("SEC_USER_AGENT") or "trading-pipeline-research (github.com/Malekhalifa/trading-pipeline)"
+DEFAULT_USER_AGENT = "trading-pipeline-research (github.com/Malekhalifa/trading-pipeline)"
+
+
+def user_agent() -> str:
+    """The SEC requires a declared contact. Read from SEC_USER_AGENT (kept in the gitignored .env), never hard-coded."""
+    load_dotenv(config.ROOT / ".env")
+    return os.environ.get("SEC_USER_AGENT") or DEFAULT_USER_AGENT
 MIN_INTERVAL_S = 0.34
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
@@ -51,7 +58,7 @@ class EdgarClient:
     def __init__(self, cache_dir: Path | None = None, http: httpx.Client | None = None):
         self.cache = Path(cache_dir) if cache_dir else config.DATA_DIR / "edgar"
         self.cache.mkdir(parents=True, exist_ok=True)
-        self._http = http or httpx.Client(headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}, timeout=30.0)
+        self._http = http or httpx.Client(headers={"User-Agent": user_agent(), "Accept-Encoding": "gzip, deflate"}, timeout=30.0)
         self._last = 0.0
 
     def _get_json(self, url: str, cache_name: str) -> dict:
