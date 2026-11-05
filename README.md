@@ -13,7 +13,7 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M1 data-depth probe | done, see below |
 | M2 recorder (backfill + incremental sync, validation) | done |
 | M3 backtest engine (signal -> bracket contract, costs, R-multiples) | done |
-| M4 opening-range filters, failed-breakout fade, parameter sweeps | next |
+| M4 opening-range filters, failed-breakout fade, walk-forward sweep | done: no strategy passed, see [docs/m4-results.md](docs/m4-results.md) |
 | M5 paper loop on Alpaca | |
 
 ## Setup

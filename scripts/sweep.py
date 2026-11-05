@@ -113,7 +113,7 @@ def sessions_in(data: Data, years: list[int]) -> list[pd.Timestamp]:
     return [s for s in data.sessions if s.year in years]
 
 
-def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by_id, all_family_raws):
+def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by_id, all_family_raws, n_planned_extra=0):
     test_years = cfg["test_years"]
     rr = REGISTRY[family]().params.rr
     folds = wf.walk_forward(raws, test_years, cfg["min_train_trades"])
@@ -133,14 +133,14 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
     # deflated Sharpe: sizing-free daily R stream vs the best-of-N luckless trials
     series = stats.daily_r_series(oos, oos_sessions)
     cross = [stats.daily_r_series(df[df["year"].isin(test_years)], oos_sessions) for df in all_family_raws]
-    n_trials = trials.count_trials()
+    n_trials = trials.count_trials() + n_planned_extra  # registry total + the regime checks still to be logged
     out["dsr"] = stats.deflated_sharpe(series, n_trials, stats.across_trials_sharpe_variance(cross))
 
     # 2x slippage: re-simulate only the configurations that were ever chosen
     stress_cost = bt.CostModel(slippage=cfg["stress_slippage"])
     stress_parts = []
     for cid in sorted({f.config_id for f in folds if f.config_id}):
-        _, sraw, _ = bt.simulate_signals(signals[cid], data.prepared, stress_cost, risk)
+        sraw, _ = bt.simulate_signals(signals[cid], data.prepared, stress_cost, risk)
         sdf = raw_frame(sraw)
         years = [f.test_year for f in folds if f.config_id == cid]
         stress_parts.append(sdf[sdf["year"].isin(years)])
@@ -206,7 +206,7 @@ def format_family(o: dict, cfg: dict) -> str:
         f"Deflated Sharpe (daily R stream): SR/day {fmt(d['sharpe_per_period'], '.4f')} (annualised {fmt(d['sharpe_annualised'], '.2f')}), "
         f"{d['n_trials']} trials logged, benchmark SR/day {fmt(d['benchmark_sharpe'], '.4f')}",
         f"  P(Sharpe > 0) = {fmt(d['psr_vs_zero'], '.3f')}    DSR = {fmt(d['dsr'], '.3f')}",
-        f"2x slippage (${o['stress'] and cfg['stress_slippage']:.3f}): expectancy {fmt(o['stress']['expectancy_R'], '+.3f')}R over {o['stress']['n']} trades",
+        f"2x slippage (${cfg['stress_slippage']:.3f}): expectancy {fmt(o['stress']['expectancy_R'], '+.3f')}R over {o['stress']['n']} trades",
         f"Whole grid, out-of-sample: {g['configs']} configs, {100 * g['share_positive_oos']:.0f}% positive, "
         f"median {fmt(g['median_oos_expectancy_R'], '+.3f')}R, best {fmt(g['best_oos_expectancy_R'], '+.3f')}R",
         f"Modal choice {o['modal_config']['id']}: {o['modal_config']['params']}",
@@ -281,7 +281,8 @@ def main() -> int:
     report, summary = [], {"name": name, "symbols": symbols, "families": {}}
     for family in families:
         configs, ids, params_by_id, raws, signals = ran[family]
-        o = analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by_id, all_raws)
+        o = analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by_id, all_raws,
+                           n_planned_extra=0 if args.no_regime_check else len(families))
         if "summary" in o and not args.no_regime_check:
             o["regime"] = regime_check(family, cfg, data, cost, risk, name, o["modal_config"]["params"], log=True)
         report.append(format_family(o, cfg))

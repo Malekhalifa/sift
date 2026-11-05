@@ -4,6 +4,7 @@ needs to correct for selection bias, so log every run, including the bad ones.""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from datetime import UTC, datetime
@@ -27,7 +28,8 @@ CREATE TABLE IF NOT EXISTS trials (
 
 def _db() -> sqlite3.Connection:
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(config.DATA_DIR / "trials.sqlite")
+    # TP_TRIALS_DB lets throwaway dev checks use their own registry without inflating the real trial count.
+    conn = sqlite3.connect(os.environ.get("TP_TRIALS_DB") or config.DATA_DIR / "trials.sqlite")
     conn.execute(SCHEMA)
     if "grp" not in {row[1] for row in conn.execute("PRAGMA table_info(trials)")}:
         conn.execute("ALTER TABLE trials ADD COLUMN grp TEXT")  # databases created before sweeps existed
