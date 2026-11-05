@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from tp.backtest import BacktestResult
+from tp import features
 from tp.bars import ET
 
 
@@ -131,3 +132,19 @@ def to_jsonable(obj):
     if isinstance(obj, np.integer):
         return int(obj)
     return obj
+
+
+def market_excess_R(raw: pd.DataFrame, spy_daily: pd.DataFrame) -> pd.Series:
+    """Each trade's R minus what holding SPY the same way over the same dates would have paid, in R.
+
+    SPY return runs from the close before the entry session to the close of the exit session. Longs earn the market,
+    shorts lose it. A positive average means the trades beat simply being long or short the market."""
+    spy = spy_daily["close"].copy()
+    spy.index = features.session_dates(spy_daily.index)
+    entry = raw["entry_ts"].dt.tz_convert(ET).dt.tz_localize(None).dt.normalize()
+    exit_ = raw["exit_ts"].dt.tz_convert(ET).dt.tz_localize(None).dt.normalize()
+    before = spy.iloc[spy.index.searchsorted(entry.to_numpy()) - 1].to_numpy()
+    after = spy.reindex(exit_).to_numpy()
+    side = np.where(raw["side"] == "long", 1.0, -1.0)
+    beta_R = side * (after / before - 1) * raw["entry_px"].to_numpy() / raw["risk_per_share"].to_numpy()
+    return pd.Series(raw["pnl_R"].to_numpy() - beta_R, index=raw.index)

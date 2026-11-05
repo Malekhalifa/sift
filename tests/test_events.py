@@ -178,3 +178,19 @@ def test_guards(monkeypatch):
         EarningsDrift(mode="bogus")
     monkeypatch.setattr(events, "load_earnings", lambda symbol: pd.DataFrame(columns=["accession", "filed_at"]))
     assert EarningsDrift().generate("AAA", bars, None, spy_for(bars)) == []
+
+
+def test_market_excess_subtracts_what_the_index_paid_in_the_same_direction():
+    from tp import metrics
+
+    spy = dbars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 100, 100, 102), (100, 100, 100, 102)], start="2024-03-04")
+    sess = spy.index.tz_convert("America/New_York")
+    raw = pd.DataFrame({
+        "side": ["long", "short"],
+        "entry_ts": [ts(sess[1].strftime("%Y-%m-%d"), "09:30")] * 2,
+        "exit_ts": [ts(sess[2].strftime("%Y-%m-%d"), "16:00")] * 2,  # SPY rises 2% over the hold
+        "entry_px": [100.0, 100.0], "risk_per_share": [2.0, 2.0], "pnl_R": [1.0, -1.0],
+    })
+    ex = metrics.market_excess_R(raw, spy)
+    # holding SPY long for 2% on a $100, $2-risk position is +1.0R; the short side lost 1.0R to the same move
+    assert ex.tolist() == pytest.approx([0.0, 0.0])

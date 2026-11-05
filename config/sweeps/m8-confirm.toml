@@ -1,0 +1,29 @@
+# M8 pre-registered CONFIRMATION: one frozen earnings-drift configuration (the M7 walk-forward's choice in every
+# fold) on 250 stocks it has never seen. Frozen when committed. Nothing is selected; the six neighbouring settings
+# run only to check robustness.
+name = "m8-confirm-v1"
+engine = "swing"
+universe = "confirm"               # config/universe_confirm.toml: ranks 151-400 by Q1-2016 dollar volume
+bar_timeframe = "1Day"
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 0               # not used: nothing is selected from training years
+slippage = 0.02                    # mid-caps trade at wider spreads than the 1 cent used for the 150 liquid names
+stress_slippage = 0.04
+max_positions = 10                 # portfolio view only
+regime_check = false
+drop_incomplete = true
+market_adjusted_check = true       # new, 7th criterion
+
+[ead]
+frozen = { mode = "drift", thr_atr = 3.0, stop_atr = 1.5, max_hold = 20 }
+configs = [
+  { mode = "drift", thr_atr = 3.0, stop_atr = 1.5, max_hold = 20 },   # the frozen configuration
+  { mode = "fade",  thr_atr = 3.0, stop_atr = 1.5, max_hold = 20 },   # the six neighbours: one parameter away
+  { mode = "drift", thr_atr = 1.0, stop_atr = 1.5, max_hold = 20 },
+  { mode = "drift", thr_atr = 2.0, stop_atr = 1.5, max_hold = 20 },
+  { mode = "drift", thr_atr = 3.0, stop_atr = 3.0, max_hold = 20 },
+  { mode = "drift", thr_atr = 3.0, stop_atr = 1.5, max_hold = 5 },
+  { mode = "drift", thr_atr = 3.0, stop_atr = 1.5, max_hold = 10 },
+]

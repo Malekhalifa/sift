@@ -8,6 +8,7 @@ fetches what is missing. Stops cleanly if the SEC rate-limits us.
 
 from __future__ import annotations
 
+import argparse
 import sys
 
 import pandas as pd
@@ -17,7 +18,13 @@ from tp.edgar import EdgarBlocked, EdgarClient
 
 
 def main() -> int:
-    symbols = list(dict.fromkeys([*config.load_universe()["universe"]["traded"], *config.events_symbols()]))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--universe", choices=["events", "confirm"], default="events")
+    args = ap.parse_args()
+    if args.universe == "confirm":
+        symbols = config.confirm_symbols()
+    else:
+        symbols = list(dict.fromkeys([*config.load_universe()["universe"]["traded"], *config.events_symbols()]))
     client = EdgarClient()
     try:
         cik_of = client.ticker_map()
@@ -37,6 +44,9 @@ def main() -> int:
         print(f"SEC rate limit: {e}. Everything fetched so far is cached; rerun in about ten minutes.", file=sys.stderr)
         return 2
     out = pd.concat(frames, ignore_index=True)
+    if events.events_path().exists():  # keep every other universe's rows; replace only the symbols fetched now
+        old = pd.read_parquet(events.events_path())
+        out = pd.concat([old[~old["symbol"].isin(out["symbol"].unique())], out], ignore_index=True)
     events.events_path().parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(events.events_path(), index=False)
     per = out.groupby("symbol").size()

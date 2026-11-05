@@ -26,6 +26,7 @@ LABELS = ["< -3", "-3 to -2", "-2 to -1", "-1 to +1", "+1 to +2", "+2 to +3", ">
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--end", type=date.fromisoformat, default=config.HOLDOUT_START - timedelta(days=1))
+    ap.add_argument("--universe", choices=["events", "confirm"], default="events")
     args = ap.parse_args()
     if args.end >= config.HOLDOUT_START:
         raise SystemExit("refusing to read the holdout")
@@ -35,7 +36,7 @@ def main() -> None:
     spy_ret.index = features.session_dates(spy.index)
 
     rows, excluded, raw_total = [], 0, 0
-    for sym in config.events_symbols():
+    for sym in (config.confirm_symbols() if args.universe == "confirm" else config.events_symbols()):
         bars = load_bars(sym, "sip", "1Day", None, hi)
         filed = events.load_earnings(sym)["filed_at"]
         filed = filed[filed < hi]

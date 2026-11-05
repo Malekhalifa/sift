@@ -106,9 +106,9 @@ def run_plan(client: AlpacaClient, plan: list[tuple[str, str, str]], now: dateti
 
 def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
     """(feed, timeframe, symbol) triples to sync, in SPECS order. `symbols` restricts to those names."""
-    core, wide, events = config.core_symbols(), config.wide_symbols(), config.events_symbols()
-    everyone = list(dict.fromkeys([*core, *wide, *events]))
-    pool = {"core": core, "wide": wide, "events": events, "all": everyone}[universe]
+    core, wide, events, confirm = config.core_symbols(), config.wide_symbols(), config.events_symbols(), config.confirm_symbols()
+    everyone = list(dict.fromkeys([*core, *wide, *events, *confirm]))
+    pool = {"core": core, "wide": wide, "events": events, "confirm": confirm, "all": everyone}[universe]
     if symbols:
         pool = symbols
     plan = []
@@ -123,7 +123,7 @@ def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--symbols", help="comma-separated; default is the chosen universe")
-    ap.add_argument("--universe", choices=["core", "wide", "events", "all"], default="all")
+    ap.add_argument("--universe", choices=["core", "wide", "events", "confirm", "all"], default="all")
     ap.add_argument("--specs", help="comma-separated feed:timeframe; default is all")
     ap.add_argument("--workers", type=int, default=1, help="parallel series (all share one request-rate budget)")
     args = ap.parse_args(argv)

@@ -62,3 +62,13 @@ def events_symbols() -> list[str]:
         return []
     with open(path, "rb") as f:
         return list(tomllib.load(f)["universe"]["events"])
+
+
+def confirm_symbols() -> list[str]:
+    """Fourth universe (ranks 151-400, scripts/select_universe.py --skip 150 --n 250 --key confirm): the fresh stocks
+    used to confirm one frozen configuration. Daily bars only."""
+    path = ROOT / "config" / "universe_confirm.toml"
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        return list(tomllib.load(f)["universe"]["confirm"])

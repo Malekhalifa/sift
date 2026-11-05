@@ -75,6 +75,7 @@ def test_build_plan_gives_each_universe_its_own_bar_types(monkeypatch):
     monkeypatch.setattr(config, "core_symbols", lambda: ["AAA", "SPY"])
     monkeypatch.setattr(config, "wide_symbols", lambda: ["WIDE1", "WIDE2"])
     monkeypatch.setattr(config, "events_symbols", lambda: ["WIDE1", "WIDE2", "EVT1"])
+    monkeypatch.setattr(config, "confirm_symbols", lambda: ["CNF1"])
     everything = list(recorder.SPECS)
     plan = recorder.build_plan(None, "all", everything)
     assert ("sip", "1Min", "AAA") in plan and ("iex", "1Min", "AAA") in plan
@@ -84,6 +85,7 @@ def test_build_plan_gives_each_universe_its_own_bar_types(monkeypatch):
     assert plan.index(("sip", "1Day", "AAA")) < plan.index(("sip", "1Min", "AAA"))  # spec order kept
     assert {s for *_, s in recorder.build_plan(None, "wide", everything)} == {"WIDE1", "WIDE2"}
     assert recorder.build_plan(["WIDE2"], "all", [("sip", "5Min")]) == [("sip", "5Min", "WIDE2")]
+    assert recorder.build_plan(None, "confirm", everything) == [("sip", "1Day", "CNF1")]  # fresh-stock universe: daily only
     only_events = recorder.build_plan(None, "events", everything)  # event-only symbols get daily bars and nothing else
     assert [p for p in only_events if p[2] == "EVT1"] == [("sip", "1Day", "EVT1")]
 

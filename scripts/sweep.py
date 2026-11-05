@@ -90,10 +90,26 @@ def fmt(x, spec=".3f"):
     return "-" if x is None or (isinstance(x, float) and not math.isfinite(x)) else format(x, spec)
 
 
+def family_configs(cls, spec: dict) -> list[dict]:
+    """Either a Cartesian grid or an explicit list of configurations (a confirmation test freezes the list)."""
+    if "configs" in spec:
+        out, seen = [], set()
+        for c in spec["configs"]:
+            c = cls.canonical(dict(c))
+            if tuple(sorted(c.items())) not in seen:
+                seen.add(tuple(sorted(c.items())))
+                out.append(c)
+        return out
+    return expand_grid(cls, spec["grid"])
+
+
+def grid_keys(spec: dict) -> list[str]:
+    return list(spec["grid"]) if "grid" in spec else sorted({k for c in spec["configs"] for k in c})
+
+
 def run_family(family: str, cfg: dict, data: Data, cost: bt.CostModel, risk: bt.RiskConfig, name: str, log: bool):
     cls = REGISTRY[family]
-    grid = cfg[family]["grid"]
-    configs = expand_grid(cls, grid)
+    configs = family_configs(cls, cfg[family])
     ids = [f"{family}-{i:03d}" for i in range(len(configs))]
     already = trials.logged_params(name) if log else set()
     raws, signals, params_by_id = {}, {}, dict(zip(ids, configs, strict=True))
@@ -121,7 +137,13 @@ def sessions_in(data: Data, years: list[int]) -> list[pd.Timestamp]:
 def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by_id, all_family_raws, n_planned_extra=0):
     test_years = cfg["test_years"]
     rr = REGISTRY[family]().params.rr
-    folds = wf.walk_forward(raws, test_years, cfg["min_train_trades"])
+    frozen = cfg[family].get("frozen")
+    if frozen:  # confirmation test: nothing is selected, the one frozen configuration is judged in every test year
+        fid = next(c for c, p in params_by_id.items() if p == REGISTRY[family].canonical(dict(frozen)))
+        folds = [wf.Fold(y, fid, float("nan"), 0, int((raws[fid]["year"] == y).sum()),
+                         float(raws[fid].loc[raws[fid]["year"] == y, "pnl_R"].mean())) for y in test_years]
+    else:
+        folds = wf.walk_forward(raws, test_years, cfg["min_train_trades"])
     oos = wf.stitch(raws, folds)
     out = {"family": family, "folds": [asdict(f) for f in folds]}
     if oos.empty:
@@ -139,7 +161,10 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
     series = stats.daily_r_series(oos, oos_sessions)
     cross = [stats.daily_r_series(df[df["year"].isin(test_years)], oos_sessions) for df in all_family_raws]
     n_trials = trials.count_trials() + n_planned_extra  # registry total + the regime checks still to be logged
-    out["dsr"] = stats.deflated_sharpe(series, n_trials, stats.across_trials_sharpe_variance(cross))
+    if frozen:  # one hypothesis chosen on other data: there is no selection among trials to deflate for
+        out["dsr"] = stats.deflated_sharpe(series, 1, 0.0)
+    else:
+        out["dsr"] = stats.deflated_sharpe(series, n_trials, stats.across_trials_sharpe_variance(cross))
 
     # 2x slippage: re-simulate only the configurations that were ever chosen
     stress_cost = bt.CostModel(slippage=cfg["stress_slippage"])
@@ -154,7 +179,7 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
 
     diag = wf.grid_diagnostics(raws, test_years)
     modal = pd.Series([f.config_id for f in folds if f.config_id]).mode().iloc[-1]
-    keys = list(cfg[family]["grid"])
+    keys = grid_keys(cfg[family])
     out["modal_config"] = {"id": modal, "params": params_by_id[modal]}
     out["stability"] = wf.neighbor_stability(modal, params_by_id, keys, diag, JOINT_AXES.get(family, ()))
     out["grid"] = {
@@ -174,6 +199,13 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
         "expectancy > 0 at 2x slippage": out["stress"]["expectancy_R"] > 0,
         f">= {MIN_NEIGHBOR_SHARE:.0%} of modal config's neighbours positive OOS": out["stability"]["share_positive"] >= MIN_NEIGHBOR_SHARE,
     }
+    if cfg.get("market_adjusted_check"):
+        ex = metrics.market_excess_R(oos, data.spy_daily)
+        half = 1.96 * float(ex.std(ddof=1)) / len(ex) ** 0.5
+        out["excess"] = {"n": len(ex), "mean": float(ex.mean()), "ci95": half,
+                         "by_side": {sd: float(ex[oos["side"] == sd].mean()) for sd in ("long", "short")},
+                         "by_year": {int(y): float(ex[oos["year"] == y].mean()) for y in sorted(oos["year"].unique())}}
+        out["checks"]["market-adjusted expectancy 95% CI lower bound > 0"] = bool(ex.mean() - half > 0)
     out["passed"] = all(out["checks"].values())
     out["oos_trades"] = oos
     return out
@@ -219,6 +251,9 @@ def format_family(o: dict, cfg: dict) -> str:
         "", "Pre-registered checks:",
     ]
     lines += [f"  [{'PASS' if ok else 'FAIL'}] {name}" for name, ok in o["checks"].items()]
+    if "excess" in o:
+        e = o["excess"]
+        lines.insert(len(lines) - len(o["checks"]) - 1, f"Excess over the market: {fmt(e['mean'], '+.3f')}R +-{fmt(e['ci95'])} over {e['n']} trades; long {fmt(e['by_side']['long'], '+.3f')}, short {fmt(e['by_side']['short'], '+.3f')}; by year {({y: round(v, 3) for y, v in e['by_year'].items()})}")
     lines.append(f"  => {'ALL PASS: eligible for the one-shot holdout run' if o['passed'] else 'NOT eligible: do not trade this'}")
     if "regime" in o:
         r = o["regime"]
@@ -250,6 +285,8 @@ def main() -> int:
         symbols = config.wide_symbols()
     elif cfg.get("universe") == "events":
         symbols = config.events_symbols()
+    elif cfg.get("universe") == "confirm":
+        symbols = config.confirm_symbols()
     else:
         symbols = config.load_universe()["universe"]["traded"]
     problems = coverage_problems(symbols, start, end, timeframe) + coverage_problems(["SPY"], start, end, "1Day")
