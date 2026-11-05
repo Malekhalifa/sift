@@ -41,3 +41,14 @@ def sess(ohlc, day="2024-03-05", start="09:30", freq="5min"):
 
 def et(day, hhmm):
     return pd.Timestamp(f"{day} {hhmm}", tz="America/New_York").tz_convert("UTC")
+
+
+def dbars(ohlc, start="2024-03-04", symbol_volume=1000):
+    """Daily bars from (open, high, low, close) tuples on consecutive business days; UTC index at midnight ET."""
+    idx = pd.bdate_range(start, periods=len(ohlc), tz="America/New_York").tz_convert("UTC")
+    df = pd.DataFrame(list(ohlc), columns=["open", "high", "low", "close"], index=idx).astype("float64")
+    df.index.name = "ts"
+    df["volume"] = symbol_volume
+    df["trade_count"] = 10
+    df["vwap"] = df["close"]
+    return df

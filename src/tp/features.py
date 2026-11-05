@@ -62,3 +62,22 @@ def sma_trend(daily: pd.DataFrame, n: int = 200) -> pd.Series:
     direction = pd.Series(np.sign((close - sma).to_numpy()), index=daily.index).fillna(0.0).shift(1).fillna(0.0)
     direction.index = session_dates(daily.index)
     return direction
+
+
+def rsi(close: pd.Series, n: int = 2) -> pd.Series:
+    """Wilder RSI. The value at t uses closes up to and including t, so it is known at the close."""
+    delta = close.diff()
+    avg_up = delta.clip(lower=0).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    avg_down = (-delta.clip(upper=0)).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    out = 100 - 100 / (1 + avg_up / avg_down)
+    return out.where(avg_down > 0, 100.0).where(avg_up.notna())
+
+
+def atr_through(daily: pd.DataFrame, n: int = 14) -> pd.Series:
+    """ATR(n) including the current session. Only valid for decisions taken after that session's close;
+    daily_atr() is the shifted version for decisions taken during the next session."""
+    prev_close = daily["close"].shift(1)
+    tr = pd.concat(
+        [daily["high"] - daily["low"], (daily["high"] - prev_close).abs(), (daily["low"] - prev_close).abs()], axis=1
+    ).max(axis=1)
+    return tr.rolling(n).mean()

@@ -41,6 +41,7 @@ class Signal:
     stop: float
     target: float
     tag: str = ""
+    hold_days: int | None = None  # swing engine only: sessions to hold at most, entry day included
 
     def __post_init__(self) -> None:
         ok = (
@@ -56,10 +57,11 @@ class Signal:
         return abs(self.entry_ref - self.stop)
 
     @classmethod
-    def bracket(cls, symbol: str, ts: pd.Timestamp, side: Side, entry_ref: float, stop: float, rr: float, tag: str = "") -> Signal:
+    def bracket(cls, symbol: str, ts: pd.Timestamp, side: Side, entry_ref: float, stop: float, rr: float, tag: str = "",
+                hold_days: int | None = None) -> Signal:
         risk = abs(entry_ref - stop)
         target = entry_ref + rr * risk if side == "long" else entry_ref - rr * risk
-        return cls(symbol, ts, side, entry_ref, stop, target, tag)
+        return cls(symbol, ts, side, entry_ref, stop, target, tag, hold_days)
 
 
 @dataclass(frozen=True)

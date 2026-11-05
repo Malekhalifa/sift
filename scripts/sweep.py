@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from tp import backtest as bt
+from tp import swing
 from tp import config, metrics, stats, store, trials
 from tp import walkforward as wf
 from tp.bars import load_bars, split_factor
@@ -43,11 +44,14 @@ class Data:
     def __init__(self, symbols: list[str], start: date, end: date, bar_timeframe: str = "1Min"):
         lo, hi = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end + timedelta(days=1), tz="UTC")
         self.frames, self.prepared, self.daily = {}, {}, {}
+        self.engine = swing if bar_timeframe == "1Day" else bt  # both expose simulate_signals(signals, prepared, cost, risk)
         for sym in symbols:
             # 5-minute bars are stored directly for the wide universe, or resampled from 1-minute bars
             bars = load_bars(sym, "sip", bar_timeframe, lo, hi, rth=True, resample="5min" if bar_timeframe == "1Min" else None)
             self.frames[sym] = bars
-            self.prepared[sym] = bt.PreparedBars.from_frame(bars, 5, split_factor(bars.index, load_splits(sym)))
+            factor = split_factor(bars.index, load_splits(sym))
+            self.prepared[sym] = (swing.PreparedDaily.from_frame(bars, factor) if bar_timeframe == "1Day"
+                                  else bt.PreparedBars.from_frame(bars, 5, factor))
             self.daily[sym] = load_bars(sym, "sip", "1Day")
         self.spy_daily = load_bars("SPY", "sip", "1Day")
         days = sorted({int(d) for pb in self.prepared.values() for d in np.unique(pb.day)})
@@ -70,7 +74,7 @@ def simulate_config(strategy, data: Data, cost: bt.CostModel, risk: bt.RiskConfi
     signals = []
     for sym, bars in data.frames.items():
         signals += strategy.generate(sym, bars, data.daily[sym], data.spy_daily)
-    raw, rejects = bt.simulate_signals(signals, data.prepared, cost, risk)
+    raw, rejects = data.engine.simulate_signals(signals, data.prepared, cost, risk)
     return signals, raw, rejects
 
 
@@ -141,7 +145,7 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
     stress_cost = bt.CostModel(slippage=cfg["stress_slippage"])
     stress_parts = []
     for cid in sorted({f.config_id for f in folds if f.config_id}):
-        sraw, _ = bt.simulate_signals(signals[cid], data.prepared, stress_cost, risk)
+        sraw, _ = data.engine.simulate_signals(signals[cid], data.prepared, stress_cost, risk)
         sdf = raw_frame(sraw)
         years = [f.test_year for f in folds if f.config_id == cid]
         stress_parts.append(sdf[sdf["year"].isin(years)])
@@ -260,7 +264,9 @@ def main() -> int:
 
     print(f"Loading {len(symbols)} symbols...", file=sys.stderr)
     data = Data(symbols, start, end, timeframe)
-    cost, risk = bt.CostModel(slippage=cfg["slippage"]), bt.RiskConfig()
+    cost = bt.CostModel(slippage=cfg["slippage"])
+    risk = bt.RiskConfig(max_positions=cfg.get("max_positions", 5))
+    regime_on = cfg.get("regime_check", True) and not args.no_regime_check
 
     if args.time_only:
         for family in families:
@@ -289,8 +295,8 @@ def main() -> int:
     for family in families:
         configs, ids, params_by_id, raws, signals = ran[family]
         o = analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by_id, all_raws,
-                           n_planned_extra=0 if args.no_regime_check else len(families))
-        if "summary" in o and not args.no_regime_check:
+                           n_planned_extra=len(families) if regime_on else 0)
+        if "summary" in o and regime_on:
             o["regime"] = regime_check(family, cfg, data, cost, risk, name, o["modal_config"]["params"], log=True)
         report.append(format_family(o, cfg))
         if "oos_trades" in o:

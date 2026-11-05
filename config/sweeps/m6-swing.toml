@@ -1,0 +1,26 @@
+# M6 pre-registered sweep: daily-bar swing strategies on the 50-stock wide universe.
+# Frozen when committed. Changing any value means a new name; trials already logged keep counting.
+name = "m6-swing-v1"
+engine = "swing"
+universe = "wide"                  # config/universe_wide.toml: top 50 by Q1-2016 dollar volume
+bar_timeframe = "1Day"             # SIP daily bars, split-adjusted
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 200
+slippage = 0.01                    # $ per share, as-traded, each market fill
+stress_slippage = 0.02             # the 2x cost check
+max_positions = 10                 # portfolio view only; the pass criteria use every simulated trade
+regime_check = false
+
+[rsi2.grid]                         # 3 x 2 x 2 x 2 = 24 configurations
+rsi_low = [5.0, 10.0, 15.0]
+trend_filter = ["none", "sma200"]
+stop_atr = [1.0, 2.0]
+max_hold = [3, 7]
+
+[pullback.grid]                     # 2 x 2 x 2 x 2 = 16 configurations
+touch_atr = [0.0, 0.5]
+stop_atr = [1.0, 2.0]
+max_hold = [5, 15]
+sma_slow = [100, 200]
