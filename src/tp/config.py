@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,6 +11,9 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[2]
 # TP_DATA_DIR lets smoke tests and experiments write somewhere other than the real store.
 DATA_DIR = Path(os.environ.get("TP_DATA_DIR", ROOT / "data"))
+# Out-of-sample data we do not look at while developing. scripts/run_backtest.py refuses to touch it
+# without --use-holdout, and flags any trial that does.
+HOLDOUT_START = date(2025, 1, 1)
 
 
 @dataclass(frozen=True)

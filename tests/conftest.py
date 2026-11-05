@@ -26,3 +26,18 @@ def make_bars(timestamps, price=100.0, volume=1000):
             "vwap": base + 0.1,
         }
     )
+
+
+def sess(ohlc, day="2024-03-05", start="09:30", freq="5min"):
+    """Bars for one ET session from (open, high, low, close) tuples; UTC index of bar opens."""
+    idx = pd.date_range(f"{day} {start}", periods=len(ohlc), freq=freq, tz="America/New_York").tz_convert("UTC")
+    df = pd.DataFrame(list(ohlc), columns=["open", "high", "low", "close"], index=idx).astype("float64")
+    df.index.name = "ts"
+    df["volume"] = 1000
+    df["trade_count"] = 10
+    df["vwap"] = df["close"]
+    return df
+
+
+def et(day, hhmm):
+    return pd.Timestamp(f"{day} {hhmm}", tz="America/New_York").tz_convert("UTC")

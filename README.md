@@ -12,8 +12,8 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M0 decisions (universe, stack, accounts) | done |
 | M1 data-depth probe | done, see below |
 | M2 recorder (backfill + incremental sync, validation) | done |
-| M3 backtest engine (signal -> bracket contract, costs, R-multiples) | next |
-| M4 opening-range strategies | |
+| M3 backtest engine (signal -> bracket contract, costs, R-multiples) | done |
+| M4 opening-range filters, failed-breakout fade, parameter sweeps | next |
 | M5 paper loop on Alpaca | |
 
 ## Setup
@@ -49,16 +49,48 @@ df = load_bars("NVDA", feed="sip", timeframe="1Min", rth=True, resample="5min") 
 
 Coarser bars are derived from 1-minute bars (`resample="5min"`), not stored separately.
 
-### Daily schedule (not installed)
+### Daily schedule (installed)
 
-`ops/launchd/com.tradingpipeline.recorder.plist` runs the recorder daily at 03:00 local time. To install:
+`ops/launchd/com.tradingpipeline.recorder.plist` runs the recorder daily at 03:00 local time (CET, which is
+21:00 ET, after the extended session and the SIP delay). If the Mac was asleep, launchd runs it on wake, and
+the recorder catches up on anything missed. Log: `data/logs/recorder.log`.
 
 ```sh
-cp ops/launchd/com.tradingpipeline.recorder.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.tradingpipeline.recorder.plist
+launchctl print gui/$(id -u)/com.tradingpipeline.recorder      # status
+launchctl kickstart gui/$(id -u)/com.tradingpipeline.recorder  # run now
+# remove:
+launchctl bootout gui/$(id -u)/com.tradingpipeline.recorder && rm ~/Library/LaunchAgents/com.tradingpipeline.recorder.plist
 ```
 
-To remove it: `launchctl unload ~/Library/LaunchAgents/com.tradingpipeline.recorder.plist`, then delete the file.
+## Backtesting
+
+```sh
+uv run python scripts/run_backtest.py --strategy orb --symbols AAPL,MSFT,NVDA --cost-sweep
+uv run python scripts/run_backtest.py --strategy orb --set or_minutes=15 --set stop_mode=atr
+```
+
+A strategy turns bars into `Signal(side, entry_ref, stop, target)` on closed bars. `tp.backtest` then simulates
+each signal and sizes the survivors. Conventions, chosen so a backtest cannot flatter the strategy:
+
+- Entry is a market fill at the **next** bar's open plus slippage. Stop and target come from the signal bar's close, like a live bracket order.
+- Stop exits pay slippage, and gaps through the stop fill at the open. Targets are limit orders that need price to trade through them.
+- A bar touching both stop and target counts as a loss. Everything is flat by 15:55 ET.
+- Slippage and trade-through are as-traded dollars, scaled by the split factor (bars are split-adjusted).
+- Strategy quality is measured in R over every simulated trade. Portfolio results (return, drawdown, Sharpe) use the trades left after sizing (1% risk of compounding equity), the leverage cap and the position cap.
+
+Overfitting guards:
+
+- **Trial registry.** Every run is appended to `data/trials.sqlite`. The count per strategy feeds the Deflated Sharpe check.
+- **Holdout.** Data from `config.HOLDOUT_START` (2025-01-01) is refused unless `--use-holdout` is passed, and such runs are flagged. Keep it for the final validation only.
+
+Verification: 61 tests, plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
+
+### Baseline result (plumbing check, not a finding)
+
+Unfiltered 5-minute ORB on AAPL, MSFT and NVDA, 2016-2024: expectancy +0.008R +-0.025 (95% CI), profit factor 1.02,
+so no edge after costs, as expected before any filter. Zero slippage gives +0.024R and 3 cents gives -0.024R, so
+costs decide it. The first run (trial 1) is in the registry with a slippage-scaling bug that overstated
+costs on split-adjusted prices; trial 2 is the corrected run.
 
 ## M1 findings (AAPL, 2026-11-05)
 
