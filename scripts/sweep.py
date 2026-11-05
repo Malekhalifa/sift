@@ -31,7 +31,10 @@ from tp.strategies import REGISTRY
 from tp.sweeps import expand_grid, load_sweep_file
 
 RAW_FIELDS = list(bt.RawTrade.__dataclass_fields__)
-JOINT_AXES = {"orb": (("stop_mode", "atr_mult"),)}  # families not listed have independent axes
+JOINT_AXES = {
+    "orb": (("stop_mode", "atr_mult"),),
+    "utstc": (("key_long", "atr_long", "key_short", "atr_short"),),  # the three UT Bot settings are one axis
+}  # families not listed have independent axes
 
 # Pass criteria, fixed in docs/m4-protocol.md before any sweep was run.
 MIN_OOS_TRADES = 300

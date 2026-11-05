@@ -1,0 +1,44 @@
+# M9 pre-registered sweep: the indicator strategies from the original list (UT Bot + STC, and a Supertrend +
+# Waddah Attar stack), 5-minute bars, 50-stock universe. Frozen when committed. Changing any value means a new name;
+# trials already logged keep counting.
+name = "m9-indicators-v1"
+universe = "wide"                  # config/universe_wide.toml: top 50 by Q1-2016 dollar volume
+bar_timeframe = "5Min"
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 200
+slippage = 0.01                    # $ per share, as-traded, each market fill
+stress_slippage = 0.02             # the 2x cost check
+regime_check = false
+drop_incomplete = true
+
+[utstc]                             # 3 UT Bot settings x 3 STC modes x 2 swing lengths = 18 configurations
+configs = [
+  { key_long = 1.0, atr_long = 10, key_short = 1.0, atr_short = 10, stc_mode = "off", swing_n = 5 },
+  { key_long = 1.0, atr_long = 10, key_short = 1.0, atr_short = 10, stc_mode = "off", swing_n = 10 },
+  { key_long = 1.0, atr_long = 10, key_short = 1.0, atr_short = 10, stc_mode = "strict", swing_n = 5 },
+  { key_long = 1.0, atr_long = 10, key_short = 1.0, atr_short = 10, stc_mode = "strict", swing_n = 10 },
+  { key_long = 1.0, atr_long = 10, key_short = 1.0, atr_short = 10, stc_mode = "loose", swing_n = 5 },
+  { key_long = 1.0, atr_long = 10, key_short = 1.0, atr_short = 10, stc_mode = "loose", swing_n = 10 },
+  # ^ standard, key 1, ATR 10
+  { key_long = 2.0, atr_long = 10, key_short = 2.0, atr_short = 10, stc_mode = "off", swing_n = 5 },
+  { key_long = 2.0, atr_long = 10, key_short = 2.0, atr_short = 10, stc_mode = "off", swing_n = 10 },
+  { key_long = 2.0, atr_long = 10, key_short = 2.0, atr_short = 10, stc_mode = "strict", swing_n = 5 },
+  { key_long = 2.0, atr_long = 10, key_short = 2.0, atr_short = 10, stc_mode = "strict", swing_n = 10 },
+  { key_long = 2.0, atr_long = 10, key_short = 2.0, atr_short = 10, stc_mode = "loose", swing_n = 5 },
+  { key_long = 2.0, atr_long = 10, key_short = 2.0, atr_short = 10, stc_mode = "loose", swing_n = 10 },
+  # ^ standard, key 2, ATR 10
+  { key_long = 2.0, atr_long = 300, key_short = 2.0, atr_short = 1, stc_mode = "off", swing_n = 5 },
+  { key_long = 2.0, atr_long = 300, key_short = 2.0, atr_short = 1, stc_mode = "off", swing_n = 10 },
+  { key_long = 2.0, atr_long = 300, key_short = 2.0, atr_short = 1, stc_mode = "strict", swing_n = 5 },
+  { key_long = 2.0, atr_long = 300, key_short = 2.0, atr_short = 1, stc_mode = "strict", swing_n = 10 },
+  { key_long = 2.0, atr_long = 300, key_short = 2.0, atr_short = 1, stc_mode = "loose", swing_n = 5 },
+  { key_long = 2.0, atr_long = 300, key_short = 2.0, atr_short = 1, stc_mode = "loose", swing_n = 10 },
+  # ^ video: long ATR 300, short ATR 1, key 2
+]
+
+[stack.grid]                        # 2 x 2 x 3 = 12 configurations
+st_mult = [2.0, 3.0]
+stop_atr = [2.0, 3.6]
+gate = ["none", "adx20", "chop50"]
