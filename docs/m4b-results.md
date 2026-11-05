@@ -25,10 +25,24 @@ configurations here, 1 regime check; the Deflated Sharpe count uses all of them)
   configurations positive, long side +0.122R). On 50 fresh stocks long and short are both -0.046R. The most
   likely explanation is that the M4 result was noise, helped by a universe of stocks that were hindsight winners.
   The protocol listed that universe bias as a risk, and this is what it looks like when it bites.
-- **Costs are the likely mechanism, not proof.** The universe is liquid, often low-priced stocks (BAC, F, T, INTC
-  and similar) with a one-cent spread. A five-minute opening range on those stocks is only a few cents wide, so
-  one cent each way is a large fraction of one R. We have not measured the zero-cost result for this universe.
 - **The SPY trend filter made it worse** (informational): -0.064R against -0.041R for the same configuration.
+
+## Diagnostic: it is not the costs
+
+I first guessed that a one-cent spread against tiny five-minute stops explained the loss. `scripts/cost_diagnostic.py`
+re-simulates exactly the configurations the walk-forward chose, in the years it chose them, at different costs
+(informational only: nothing is selected or tuned):
+
+| Cost level | Trades | Win % | Expectancy | 95% CI | Profit factor |
+|---|---|---|---|---|---|
+| Zero cost | 4168 | 44.7 | -0.020R | +-0.028 | 0.95 |
+| Half slippage | 4168 | 44.3 | -0.034R | +-0.028 | 0.92 |
+| Backtest (1 cent) | 4168 | 44.0 | -0.046R | +-0.028 | 0.89 |
+| Double (2 cents) | 4168 | 43.1 | -0.070R | +-0.028 | 0.84 |
+
+The median stop is 1.31% of the price, so a penny each way takes about 2% of one R, and no trade loses a quarter
+of an R to slippage. **The guess was wrong.** Costs take about 0.026R off a gross result that is already zero:
+-0.020R with an interval that includes zero. The breakout has no gross edge on these stocks.
 
 ## Consequence
 
@@ -37,5 +51,5 @@ M4 (fade and breakout) that is every strategy tested so far, and none has an edg
 
 ## What this does not show
 
-That no intraday strategy can work, or that 5-minute bars on large caps cannot work with a larger stop relative to
-the cost. It shows that a fixed 1:1.5 opening-range strategy with these stops does not clear a one-cent spread.
+That no intraday strategy can work. It shows that a fixed 1:1.5 opening-range breakout on liquid large caps has
+no gross edge to begin with (zero-cost expectancy is -0.020R +-0.028), so cheaper execution would not rescue it.
