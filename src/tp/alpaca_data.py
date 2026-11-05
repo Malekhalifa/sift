@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Iterator, Sequence
 from datetime import date, datetime
@@ -37,14 +38,21 @@ class AlpacaClient:
             timeout=timeout,
         )
         self._last_request = 0.0
+        self._throttle_lock = threading.Lock()
 
-    def _get(self, url: str, params: dict | None = None) -> dict:
-        last_error = "no attempt made"
-        for attempt in range(MAX_ATTEMPTS):
+    def _throttle(self) -> None:
+        """Space request starts at least MIN_INTERVAL_S apart across all threads, so parallel downloads share
+        one rate budget instead of each spending it."""
+        with self._throttle_lock:
             wait = MIN_INTERVAL_S - (time.monotonic() - self._last_request)
             if wait > 0:
                 time.sleep(wait)
             self._last_request = time.monotonic()
+
+    def _get(self, url: str, params: dict | None = None) -> dict:
+        last_error = "no attempt made"
+        for attempt in range(MAX_ATTEMPTS):
+            self._throttle()
             try:
                 r = self._http.get(url, params=params)
             except httpx.TransportError as e:

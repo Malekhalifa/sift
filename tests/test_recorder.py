@@ -83,3 +83,29 @@ def test_build_plan_gives_each_universe_its_own_bar_types(monkeypatch):
     assert plan.index(("sip", "1Day", "AAA")) < plan.index(("sip", "1Min", "AAA"))  # spec order kept
     assert {s for *_, s in recorder.build_plan(None, "wide", everything)} == {"WIDE1", "WIDE2"}
     assert recorder.build_plan(["WIDE2"], "all", [("sip", "5Min")]) == [("sip", "5Min", "WIDE2")]
+
+
+def test_run_plan_parallel_matches_sequential_and_isolates_failures(monkeypatch, tmp_data_dir):
+    from tp import store as st
+
+    monkeypatch.setitem(recorder.FEED_START, "sip", date(2023, 12, 1))
+    now = datetime(2025, 2, 10, 18, 0, tzinfo=UTC)
+    plan = [("sip", "5Min", s) for s in ("AAA", "BBB", "CCC", "DDD")]
+
+    class Flaky(FakeClient):
+        def bars(self, symbol, *a, **k):
+            if symbol == "CCC":
+                raise RuntimeError("boom")
+            yield from super().bars(symbol, *a, **k)
+
+    failures = recorder.run_plan(Flaky(), plan, now, workers=4)
+    assert len(failures) == 1 and "CCC" in failures[0] and "boom" in failures[0]
+    assert st.stored_years("sip", "5Min", "AAA") and not st.stored_years("sip", "5Min", "CCC")
+    parallel = {s: st.load_raw("sip", "5Min", s) for s in ("AAA", "BBB", "DDD")}
+
+    for s in ("AAA", "BBB", "DDD"):  # a sequential run into a clean store must give identical bars
+        for y in st.stored_years("sip", "5Min", s):
+            st.year_path("sip", "5Min", s, y).unlink()
+    assert recorder.run_plan(FakeClient(), [("sip", "5Min", s) for s in ("AAA", "BBB", "DDD")], now, workers=1) == []
+    for s, df in parallel.items():
+        assert df.equals(st.load_raw("sip", "5Min", s))

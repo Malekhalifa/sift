@@ -16,8 +16,6 @@ from pathlib import Path
 from tp import config
 
 LOGS = config.DATA_DIR / "logs"
-SWEEP_LOG = LOGS / "sweep-m4-v1.log"
-SWEEP_TOTALS = {"orb": 54, "fade": 24}
 BAR = 32
 
 
@@ -62,71 +60,125 @@ def eta_text(done: int, total: int, per_item: float | None) -> str:
 
 
 def download_section() -> list[str]:
-    path = latest("backfill-resume-*.log")
+    path = latest("backfill-*.log")
     text = read(path)
-    lines = ["DATA DOWNLOAD  (1-minute prices, 12 tickers x 2 sources)"]
+    lines = ["DATA DOWNLOAD"]
     if not text:
         return lines + ["  no download log found"]
-    done = re.findall(r"\[(\d+)/(\d+)\] (\w+) 1Min (\w+) \+\d+ bars \(([\d.]+)s\)", text)
-    failed = re.findall(r"\[\d+/\d+\] (\w+) 1Min (\w+) FAILED", text)
-    total = int(re.search(r"\[\d+/(\d+)\]", text).group(1)) if re.search(r"\[\d+/(\d+)\]", text) else 24
+    row = r"\[(\d+)/(\d+)\] (\w+) (\w+) (\w+)"
+    done = re.findall(row + r" \+\d+ bars \(([\d.]+)s\)", text)  # n, total, feed, tf, symbol, secs
+    failed = re.findall(row + r" FAILED", text)
+    totals = re.findall(r"\[\d+/(\d+)\]", text)
+    m_syms = re.search(r"splits synced: \d+ records for (\d+) symbols", text)
+    n_syms = int(m_syms.group(1)) if m_syms else 0
+    total = int(totals[-1]) if totals else 0
     n_done = len(done) + len(failed)
     alive = running("m tp.recorder")
     started = first_timestamp(text)
-    secs = [float(d[4]) for d in done if float(d[4]) > 5]  # skip the near-instant "already up to date" rows
-    per = sum(secs[-4:]) / len(secs[-4:]) if secs else None
+    secs = [float(d[5]) for d in done if float(d[5]) > 2]  # skip near-instant "already up to date" rows
+    per = sum(secs[-6:]) / len(secs[-6:]) if secs else None
+
+    universe = "wide universe" if n_syms > 14 else "core universe"
+    lines[0] = f"DATA DOWNLOAD  ({universe}: {n_syms} tickers, {total} series; {path.name})"
     lines.append("  " + bar(n_done, total))
-    state = "running" if alive else ("finished" if n_done >= total else "NOT running")
+    state = "running" if alive else ("finished" if total and n_done >= total else "NOT running")
     elapsed = f", running for {human((datetime.now() - started).total_seconds())}" if started and alive else ""
-    lines.append(f"  status: {state}{elapsed}; {eta_text(n_done, total, per) if alive else ''}".rstrip("; "))
-    ok = {(d[2], d[3]) for d in done}
-    bad = {(f[0], f[1]) for f in failed}
-    symbols = config.all_symbols()
-    pending = [(f, s) for f in ("sip", "iex") for s in symbols if (f, s) not in ok | bad]
-    current = pending[0] if alive and pending else None
-    for feed, label in (("sip", "SIP full market"), ("iex", "IEX live feed")):
-        cells = []
-        for s in symbols:
-            mark = "✗" if (feed, s) in bad else "✓" if (feed, s) in ok else "▶" if (feed, s) == current else "·"
-            cells.append(f"{mark}{s}")
-        lines.append(f"  {label:<16} " + " ".join(cells))
-    lines.append("  ✓ done  ▶ downloading now  · waiting")
+    lines.append(f"  status: {state}{elapsed}@@ETA@@")
+
+    ok = {(d[2], d[3], d[4]) for d in done}
+    bad = {(f[2], f[3], f[4]) for f in failed}
+    seen_specs = list(dict.fromkeys((d[2], d[3]) for d in [*done, *failed]))
+    n_specs = round(total / n_syms) if n_syms else len(seen_specs)
+    from tp.recorder import CORE_SPECS, SPECS, WIDE_SPECS  # spec order, to name the ones not started yet
+
+    kinds = WIDE_SPECS if n_syms > 14 else CORE_SPECS
+    upcoming = [sp for sp in SPECS if sp in kinds and sp not in seen_specs][: max(n_specs - len(seen_specs), 0)]
+    all_specs = seen_specs + upcoming
+    current_spec = None
+    if alive and n_done < total and all_specs:
+        current_spec = all_specs[min(n_done // max(n_syms, 1), len(all_specs) - 1)]
+    if alive and current_spec and n_syms:
+        in_spec = [float(d[5]) for d in done if (d[2], d[3]) == current_spec and float(d[5]) > 2]
+        left_here = n_syms - sum(1 for k in ok | bad if k[:2] == current_spec)
+        untimed = [sp for sp in all_specs[all_specs.index(current_spec) + 1 :] if sp not in seen_specs]
+        if in_spec:
+            here = sum(in_spec[-6:]) / len(in_spec[-6:]) * left_here
+            note = f" for this step; the {', '.join(tf for _, tf in untimed)} step is timed once it starts" if untimed else ""
+            eta = f"; about {human(here)} left{note} (this step done around {(datetime.now() + timedelta(seconds=here)):%H:%M})"
+        else:
+            eta = "; estimating..."
+        lines[-1] = lines[-1].replace("@@ETA@@", eta)
+    else:
+        lines[-1] = lines[-1].replace("@@ETA@@", "")
+    names = {"sip": "SIP full market", "iex": "IEX live feed"}
+    if n_syms <= 14:
+        symbols = config.all_symbols()
+        for feed, tf in all_specs:
+            pending = [s for s in symbols if (feed, tf, s) not in ok | bad]
+            cur = pending[0] if (feed, tf) == current_spec and pending else None
+            cells = [("✗" if (feed, tf, s) in bad else "✓" if (feed, tf, s) in ok else "▶" if s == cur else "·") + s for s in symbols]
+            lines.append(f"  {names.get(feed, feed)} {tf:<5} " + " ".join(cells))
+        lines.append("  ✓ done  ▶ downloading now  · waiting")
+    else:
+        for feed, tf in all_specs:
+            n_ok = sum(1 for k in ok if k[:2] == (feed, tf))
+            n_bad = sum(1 for k in bad if k[:2] == (feed, tf))
+            mark = "▶" if (feed, tf) == current_spec else ("✓" if n_ok + n_bad >= n_syms else "·")
+            fail = f"  ({n_bad} failed)" if n_bad else ""
+            lines.append(f"  {mark} {names.get(feed, feed)} {tf:<5} {bar(n_ok + n_bad, n_syms)}{fail}")
+        last = done[-1][4] if done else "-"
+        lines.append(f"  last finished: {last}")
     return lines
 
 
+def sweep_names() -> list[str]:
+    import tomllib
+
+    names = []
+    for path in sorted((config.ROOT / "config" / "sweeps").glob("*.toml"), key=lambda p: p.stat().st_mtime):
+        with open(path, "rb") as f:
+            names.append(tomllib.load(f)["name"])
+    return names
+
+
 def sweep_section(download_alive: bool) -> list[str]:
-    text = read(SWEEP_LOG)
-    lines = ["", "BIG TEST  (78 strategy variants, tested year by year)"]
+    lines = []
+    for name in sweep_names():
+        lines += ["", f"BIG TEST  ({name})"] + sweep_block(name, download_alive)
+    return lines
+
+
+def sweep_block(name: str, download_alive: bool) -> list[str]:
+    path = LOGS / f"sweep-{name}.log"
+    text = read(path)
+    lines: list[str] = []
     if not text:
-        waiting = "waiting for SPY data to finish downloading, then it starts by itself" if download_alive else "not started"
-        return lines + [f"  {waiting}"]
+        return [f"  {'waiting for its data to finish downloading' if download_alive else 'not started'}"]
     exit_m = re.search(r"^exit=(\d+)", text, re.M)
-    counts = {fam: len(re.findall(rf"\[\d+/{n}\] {fam}-\d+", text)) for fam, n in SWEEP_TOTALS.items()}
-    secs = [float(s) for s in re.findall(r"\] (?:orb|fade)-\d+ ([\d.]+)s", text)]
+    totals = {fam: int(n) for fam, n in re.findall(r"\[\d+/(\d+)\] (\w+)-\d+ ", text)[::-1]} if False else {}
+    for n, fam in re.findall(r"\[\d+/(\d+)\] ([a-z]+)-\d+ ", text):
+        totals[fam] = int(n)
+    counts = {fam: len(re.findall(rf"\[\d+/{n}\] {fam}-\d+", text)) for fam, n in totals.items()}
+    secs = [float(x) for x in re.findall(r"\] [a-z]+-\d+ ([\d.]+)s", text)]
     per = sum(secs[-6:]) / len(secs[-6:]) if secs else None
-    total = sum(SWEEP_TOTALS.values())
+    total = sum(totals.values())
     done = sum(counts.values())
     if exit_m:
         code = int(exit_m.group(1))
-        verdict = "finished" if code == 0 else f"STOPPED with exit code {code}, see {SWEEP_LOG}"
         lines.append("  " + bar(done, total))
-        lines.append(f"  status: {verdict}")
         if code == 0:
-            lines.append(f"  results: {config.DATA_DIR / 'sweeps' / 'm4-v1' / 'report.txt'}")
+            lines += ["  status: finished", f"  results: {config.DATA_DIR / 'sweeps' / name / 'report.txt'}"]
         else:
-            lines += ["  " + ln for ln in text.strip().splitlines()[-4:]]
+            lines += [f"  status: STOPPED with exit code {code}", *["  " + ln for ln in text.strip().splitlines()[-4:]]]
         return lines
     if "Incomplete data" in text:
         return lines + ["  stopped: data incomplete", *["  " + ln for ln in text.strip().splitlines()[-4:]]]
-    if "Loading" in text and done == 0:
-        phase = "loading price history into memory"
-    elif done < total:
-        phase = "trying strategy variants" + (f" ({'breakout' if counts['fade'] == 0 else 'fade'} family)")
-    else:
-        phase = "scoring results (walk-forward, significance checks)"
+    if not totals:
+        return lines + ["  loading price history into memory"]
+    phase = "trying strategy variants" if done < total else "scoring results (walk-forward, significance checks)"
     lines.append("  " + bar(done, total))
-    lines.append(f"  breakout {counts['orb']}/{SWEEP_TOTALS['orb']}    fade {counts['fade']}/{SWEEP_TOTALS['fade']}")
-    lines.append(f"  status: {phase}; {eta_text(done, total, per) if done < total else ''}".rstrip("; "))
+    lines.append("  " + "    ".join(f"{fam} {counts[fam]}/{n}" for fam, n in totals.items()))
+    lines.append(f"  status: {phase}" + (f"; {eta_text(done, total, per)}" if done < total else ""))
     return lines
 
 

@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import fcntl
 import logging
+import threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -75,6 +77,32 @@ def parse_specs(text: str | None) -> list[tuple[str, str]]:
     return specs  # type: ignore[return-value]
 
 
+def run_plan(client: AlpacaClient, plan: list[tuple[str, str, str]], now: datetime, workers: int = 1) -> list[str]:
+    """Sync every (feed, timeframe, symbol). Each series writes its own files, so they can run in parallel; the
+    client throttles all threads to one shared request rate. Returns the failures instead of raising."""
+    total, failures = len(plan), []
+    lock, finished = threading.Lock(), [0]
+
+    def one(item: tuple[str, str, str]) -> None:
+        feed, timeframe, symbol = item
+        t0 = _time.monotonic()
+        try:
+            added, error = sync_series(client, feed, timeframe, symbol, now), None
+        except Exception as e:  # noqa: BLE001 - one bad series must not stop the rest
+            added, error = 0, e
+        with lock:
+            finished[0] += 1
+            if error is not None:
+                failures.append(f"{feed}/{timeframe}/{symbol}: {error}")
+                log.error("[%d/%d] %s %s %s FAILED: %s", finished[0], total, feed, timeframe, symbol, error)
+            else:
+                log.info("[%d/%d] %s %s %s +%d bars (%.1fs)", finished[0], total, feed, timeframe, symbol, added, _time.monotonic() - t0)
+
+    with ThreadPoolExecutor(max_workers=max(workers, 1)) as pool:
+        list(pool.map(one, plan))
+    return failures
+
+
 def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
     """(feed, timeframe, symbol) triples to sync, in SPECS order. `symbols` restricts to those names."""
     core, wide = config.core_symbols(), config.wide_symbols()
@@ -95,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--symbols", help="comma-separated; default is the chosen universe")
     ap.add_argument("--universe", choices=["core", "wide", "all"], default="all")
     ap.add_argument("--specs", help="comma-separated feed:timeframe; default is all")
+    ap.add_argument("--workers", type=int, default=1, help="parallel series (all share one request-rate budget)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per request drowns the progress log
@@ -118,16 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("splits synced: %d records for %d symbols", len(splits), len(all_names))
 
     total = len(plan)
-    failures: list[str] = []
-    for done, (feed, timeframe, symbol) in enumerate(plan, 1):
-        t0 = _time.monotonic()
-        try:
-            added = sync_series(client, feed, timeframe, symbol, now)
-        except AlpacaError as e:
-            failures.append(f"{feed}/{timeframe}/{symbol}: {e}")
-            log.error("[%d/%d] %s %s %s FAILED: %s", done, total, feed, timeframe, symbol, e)
-            continue
-        log.info("[%d/%d] %s %s %s +%d bars (%.1fs)", done, total, feed, timeframe, symbol, added, _time.monotonic() - t0)
+    failures = run_plan(client, plan, now, args.workers)
 
     if failures:
         log.error("%d series failed:\n  %s", len(failures), "\n  ".join(failures))

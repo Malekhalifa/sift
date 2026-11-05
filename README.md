@@ -14,7 +14,8 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M2 recorder (backfill + incremental sync, validation) | done |
 | M3 backtest engine (signal -> bracket contract, costs, R-multiples) | done |
 | M4 opening-range filters, failed-breakout fade, walk-forward sweep | done: no strategy passed, see [docs/m4-results.md](docs/m4-results.md) |
-| M5 paper loop on Alpaca | |
+| M4b breakout on a wider universe (50 stocks) | done: failed, significantly negative, see [docs/m4b-results.md](docs/m4b-results.md) |
+| M5 paper loop on Alpaca | in progress (plumbing only: no strategy has passed) |
 
 ## Setup
 
