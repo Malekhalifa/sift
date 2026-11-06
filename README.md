@@ -84,6 +84,8 @@ flowchart TD
 ```
 <!-- /diagram -->
 
+<sub>SEC = US Securities and Exchange Commission; EDGAR = its public filing database; Alpaca = a US broker whose free tier supplies the price data; walk-forward = settings chosen on earlier years, tested on later ones; holdout = recent data kept unseen until the end.</sub>
+
 1. **Data.** A recorder downloads free bars (Alpaca's free tier, back to 2016), SEC filings, government contract records and
    public post archives into a local store. Stock splits are applied when data is read.
 2. **Strategies.** Each idea becomes exact rules that output signals: direction, entry, stop and a target at 1.5 times the risk.
@@ -141,6 +143,8 @@ flowchart LR
   G4 --> d2[Pentagon awards]
 ```
 <!-- /diagram -->
+
+<sub>RSI 2 = 2-day Relative Strength Index; UT Bot = a trailing-stop trend indicator; STC = Schaff Trend Cycle, a momentum-cycle indicator; Supertrend = a trend line built from the average daily price range; Waddah = the Waddah Attar Explosion momentum indicator.</sub>
 
 1. **Costs were not the main reason.** Several families had no edge even at zero cost.
 2. **The market did the work.** Long-only rules were positive largely because stocks rose in 2019 to 2024.

@@ -42,13 +42,20 @@
 % block quotes become callout boxes
 \renewenvironment{quote}{\begin{tcolorbox}[enhanced,breakable,colback=accent!6,colframe=accent,boxrule=0pt,leftrule=3.5pt,arc=0pt,outer arc=0pt,left=11pt,right=11pt,top=7pt,bottom=7pt,before skip=10pt,after skip=12pt,fontupper=\sffamily\small\color{ink}]}{\end{tcolorbox}}
 
-% tables: sans, small, striped rows
-\AtBeginEnvironment{longtable}{\sffamily\footnotesize\setlength{\tabcolsep}{5pt}\renewcommand{\arraystretch}{1.25}\rowcolors{2}{rowshade}{white}}
+% tables: unbreakable (a table moves to the next page whole), sans, small, striped rows
+\renewenvironment{longtable}[2][]{\par\vspace{5pt}\noindent\begin{minipage}{\linewidth}\sffamily\footnotesize\setlength{\tabcolsep}{5pt}\renewcommand{\arraystretch}{1.25}\rowcolors{2}{rowshade}{white}\begin{tabular}{#2}}{\end{tabular}\end{minipage}\par\vspace{7pt}}
+\renewcommand{\endhead}{}\renewcommand{\endfirsthead}{}\renewcommand{\endfoot}{}\renewcommand{\endlastfoot}{}
 \setlength{\emergencystretch}{3em}
 
 % figures stay where they are written; captions small sans
 \usepackage{float}
-\floatplacement{figure}{H}
+\floatplacement{figure}{tbp}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.8}
+\setcounter{topnumber}{2}
+\setcounter{totalnumber}{3}
 \usepackage{caption}
 \captionsetup{font={small,sf},labelformat=empty,justification=raggedright,singlelinecheck=false,skip=8pt,textfont={color=muted}}
 \setkeys{Gin}{keepaspectratio}

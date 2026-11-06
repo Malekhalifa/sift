@@ -77,7 +77,8 @@ flowchart TD
 ```
 <!-- /diagram -->
 
-*Figure 1. The pipeline. Data flows from free sources through a split-safe store into strategies and a cost-aware backtest; only an idea that passes every check reaches the holdout, and only after that paper trading.*
+*Figure 1. The pipeline. Data flows from free sources through a split-safe store into strategies and a cost-aware backtest; only an idea that passes every check reaches the holdout, and only after that paper trading.
+Terms: Alpaca = a US broker whose free tier supplies the price data. Bars = price candles (open, high, low, close, volume) for one time period. SEC = the US Securities and Exchange Commission; EDGAR = its public database of company filings. Split-safe = stock splits are adjusted when data is read. Stop = an order that exits a losing trade; target = an order that exits a winning trade. Backtest = replaying history to see what a rule would have done. Walk-forward = choosing settings on earlier years and testing them on later ones. Holdout = recent data kept unseen until the end. Paper trading = simulated trading on a broker's practice account. Trials counted = every configuration tried is logged.*
 
 The work was organised as one **milestone per idea**. For each, a protocol (the exact rules, the parameter grid and the pass
 criteria) was written and committed to version control first; the test was then run once, and the result was recorded
@@ -154,6 +155,10 @@ the intuition that politics moves stocks (7 and 8).
 One more test is a side question, not an idea (section 6): whether a 200-day trend filter makes simply holding the market
 safer.
 
+**What was expected.** Where a protocol stated a chance of passing in advance, it was low: about 3 to 5% for each indicator
+bot, about 10% for insider buying, 12% and 8% for the two volume ideas, and 3% and 2% for the two political ones. The
+outcomes were consistent with those priors, and none of the tests was chosen because it was expected to win.
+
 ## 3. How the tests were kept honest
 
 Most backtests that look good are noise that was selected. The framework was built to make that hard: Figure 2 shows the
@@ -166,7 +171,7 @@ method applied to every idea, and the table lists its safeguards.
 | **Untouched holdout** | Data from 2025 onward is kept for a single final run, and only for an idea that has already passed everything. The code refuses to read it without an explicit flag. No analysis has read it. |
 | **Trial counting and Deflated Sharpe** | Every configuration tried is logged (298 in total). The Deflated Sharpe Ratio ([Bailey and Lopez de Prado](https://papers.ssrn.com/abstract=2460551)) asks whether a result still stands after paying for the number of attempts. |
 | **Realistic fills and costs** | Next-bar fills, stops assumed hit first when a bar is ambiguous, gaps filled at the open, per-share slippage on market fills, limit targets that must trade through to fill, stock splits handled at read time, one open trade per symbol. A stress test doubles costs. |
-| **Market-adjusted check** | Added after earnings drift: each trade's result minus what holding SPY the same way over the same dates would have earned. |
+| **Market-adjusted check** | Added after earnings drift: each trade's result minus what holding SPY (the exchange-traded fund that tracks the S&P 500 index) the same way over the same dates would have earned. |
 | **Replication on unseen stocks** | A single frozen setting is run once on stocks that took no part in choosing it. |
 
 **Pass criteria (all must hold):** at least 300 out-of-sample trades; the 95% interval of expectancy above zero; Deflated
@@ -176,6 +181,56 @@ trades is "inconclusive", not a pass.
 
 A note on units: **R** is profit measured in the amount risked on the trade. +0.1R means the average trade made 10% of
 what it risked, after costs.
+
+### Reading a result
+
+A worked example shows why the 1.5 times target matters. Suppose each trade risks $100, the distance from the entry to the
+stop. A winner that reaches the target earns $150, which is +1.5R; a loser costs $100, which is -1R. The break-even win rate
+is therefore 40% (0.4 x 1.5 - 0.6 x 1 = 0). A rule can win 46% of its trades and still earn almost nothing: the insider-buying
+test won 45.9%, but its wins averaged +1.26R and its losses -1.02R, which nets to +0.03R before looking at the market.
+
+A test's result is its average R per trade, the expectancy, with a 95% confidence interval: the range in which the true
+average very probably lies. "+0.028R +-0.078" means the true value could be anywhere from -0.050R to +0.106R, so it cannot
+be told apart from zero. A result counts as an edge only when the whole interval sits above zero.
+
+### How a trade is simulated
+
+Each strategy emits a signal when a bar closes. The simulator then follows a fixed script, so that a rule cannot flatter itself:
+
+1. **Entry.** A market order is filled at the next bar's open plus slippage, an assumed cost per share: one cent on liquid
+   stocks, two cents on mid-sized ones, doubled in the stress test.
+2. **Exit.** The stop and the target are set when the signal fires. If one bar touches both, the loss is counted, the cautious
+   assumption. If price gaps past the stop, the exit is at the gap price, not at the stop. A profit target fills only when
+   price trades through it, not when it merely touches it. Intraday trades are closed by 15:55 New York time; daily trades
+   are closed at the close after a maximum holding period.
+3. **Measurement.** Every simulated trade is scored in R, before any position sizing, so the statistics do not depend on how
+   much money is assumed to be in the account. A separate portfolio view sizes each trade to risk 1% of the account under
+   leverage and position caps.
+
+### How walk-forward works
+
+Settings are never judged on the data that chose them. For each test year, the best-looking setting is picked using only
+earlier years and then run on the year it has not seen:
+
+| Test year | Setting chosen using data from |
+|----------|----------------------------------|
+| 2019 | 2016 to 2018 |
+| 2020 | 2016 to 2019 |
+| 2021 | 2016 to 2020 |
+| 2022 | 2016 to 2021 |
+| 2023 | 2016 to 2022 |
+| 2024 | 2016 to 2023 |
+
+The six test years are joined into one out-of-sample record, and that record is what the results below report. "Best-looking"
+means the highest average R minus one standard error, so a setting that did well on very few trades is penalised.
+
+### What the Deflated Sharpe check asks
+
+The Sharpe ratio measures return per unit of risk. If hundreds of settings are tried, the best of them will have an
+impressive Sharpe ratio by luck alone, even if every one is worthless. The Deflated Sharpe Ratio estimates the probability
+that the best result is genuine after discounting for the number of attempts (298 in total here); the criterion is at least
+0.95. For a single frozen setting tested once on new stocks (M8) there is nothing to deflate for, so the check reduces to the
+probability that the true Sharpe ratio is above zero.
 
 <!-- diagram:method -->
 ```mermaid
@@ -191,7 +246,8 @@ flowchart TD
 ```
 <!-- /diagram -->
 
-*Figure 2. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.*
+*Figure 2. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.
+Terms: Pre-register = write down and commit the rules before running anything. Protocol = the exact rules and pass criteria; grid = the list of parameter settings to try. Walk-forward = settings chosen on earlier years, tested on later ones (section 3). Minus the market = subtract what simply holding the market earned over the same dates. Every trial counted = each setting tried is logged and the final statistics account for the number of tries. Checks = the seven pass criteria listed in section 3. Unseen stocks = stocks that took no part in choosing the setting. Holdout = data from 2025 onward, kept unread.*
 
 ## 4. Results
 
@@ -219,12 +275,64 @@ same results as a picture, with their 95% intervals.
 
 *Figure 3. Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge.
 Blue: as tested. Orange: after subtracting what simply holding the market earned over the same dates, a check added
-from M7 on. Lines are 95% confidence intervals.*
+from M7 on. Lines are 95% confidence intervals.
+Terms: M4 to M11 = the milestone numbers of the tests (see the table above). RSI(2) = Relative Strength Index over 2 days, a gauge of very short-term momentum. 20/200-day = the 20-day and 200-day moving averages of the price. UT Bot = a trailing-stop trend indicator popular on charting sites; Schaff Trend Cycle (STC) = a momentum-cycle indicator. Supertrend = a trend line built from the average daily price range; Waddah Attar = a momentum-surge indicator. Form 4 = the SEC filing in which company insiders report their trades. Earnings drift = a stock keeps moving after its earnings reaction.*
 
 M12 is an event study (average market-adjusted return over five sessions, net of 10 basis points), not a strategy sweep,
 so it has its own four criteria. "M4" and "M4b" are the ten-stock and fifty-stock runs of the same breakout grid.
 
 Details, protocols and per-year numbers for each row are in `docs/m*-protocol.md` and `docs/m*-results.md`.
+
+### Reading the table
+
+Each row is one test, run once. The result column is the average out-of-sample R per trade with its 95% interval, and the last
+column counts the pre-registered checks passed (six, or seven from M8 on). Three patterns stand out:
+
+- **Intervals shrink with the number of trades.** The two indicator bots (M9) had about 100,000 trades each and intervals of
+  +-0.005R, so their small negative results are firm. The ten-stock breakout (M4) had 435 trades and an interval of +-0.114R,
+  wide enough to hide almost anything.
+- **Positive is not the same as significant.** Only two ideas had an interval entirely above zero before the market was
+  subtracted: earnings drift (M7) and high-volume continuation (M11).
+- **Most failures were not close calls.** Seven of the twelve ideas passed only the minimum-trade-count check.
+
+### Which safeguard stopped each idea
+
+The matrix shows, for the twelve strategy tests, which pre-registered check each idea passed (yes) or failed (no); the columns
+follow the seven checks of section 3. A dash means the check did not exist yet: the market-adjusted comparison was added after
+earnings drift (M7).
+
+| Idea | Enough trades | Above zero | Deflated Sharpe | Years | 2x costs | Neighbours | Market-adjusted |
+|--------------------|------|------|------|------|------|------|------|
+| Opening-range breakout (M4) | yes | no | no | yes | yes | no | - |
+| Failed-breakout fade (M4) | yes | no | no | no | no | no | - |
+| Opening-range breakout, 50 stocks (M4b) | yes | no | no | no | no | no | - |
+| RSI(2) mean reversion (M6) | yes | no | no | no | no | no | - |
+| 20/200-day pullback (M6) | yes | no | no | no | no | no | - |
+| Earnings drift (M7) | yes | yes | no | yes | yes | yes | - |
+| Earnings drift, replicated (M8) | yes | no | no | no | yes | no | no |
+| UT Bot + Schaff Trend Cycle (M9) | yes | no | no | no | no | no | - |
+| Supertrend + Waddah Attar (M9) | yes | no | no | no | no | no | - |
+| Insider buying (M10) | yes | no | no | no | yes | yes | no |
+| Volume-dry-up reversal (M11) | yes | no | no | no | no | no | no |
+| High-volume continuation (M11) | yes | yes | no | yes | yes | yes | no |
+
+Two checks did most of the work. Every idea had enough trades, but none passed the Deflated Sharpe check, and none of the
+four ideas tested against the market passed that comparison. The interval check alone would have let two ideas through; the
+market-adjusted comparison removed the rest of their gain. The M12 event studies and the M13 trend filter have their own
+criteria and are not in the matrix.
+
+### The two event studies (M12)
+
+M12 asks a simpler question than the strategy tests: after the news, is any average move left to trade? For each event the
+study enters at the first open at which the news could be traded (a post before 09:30 New York time at that day's open, any
+other post at the next open, and a contract award at the open two sessions after its date, to err on the side of caution). It
+holds five sessions, subtracts what SPY did over the same dates and 10 basis points of cost, and flips the sign for a negative
+post. Four criteria were fixed in advance: at least 100 events; a positive average whose 97.5% interval lies above zero; a
+positive average in two thirds of the years with at least eight events; and a positive average in both halves of the sample.
+
+Posts failed all but the first (average -0.05%, positive in only 2 of 6 years); awards also failed all but the first (average
+-0.10%, positive in 5 of 9 years). Splitting the posts by tone changed little: positive posts averaged -0.01% and negative
+posts -0.12%, where a negative number means the trade direction was wrong.
 
 ## 5. What kept recurring
 
@@ -250,7 +358,8 @@ flowchart LR
 ```
 <!-- /diagram -->
 
-*Figure 4. Why each idea failed, by main reason. Several had more than one: the breakout, for example, also showed a faint edge on 10 stocks that vanished on 50.*
+*Figure 4. Why each idea failed, by main reason. Several had more than one: the breakout, for example, also showed a faint edge on 10 stocks that vanished on 50.
+Terms: Before costs = the test was repeated with trading costs set to zero and still showed no gain. RSI 2 = 2-day Relative Strength Index. UT Bot = a trailing-stop trend indicator; STC = Schaff Trend Cycle, a momentum-cycle indicator. Supertrend = a trend line built from the average daily price range; Waddah = the Waddah Attar Explosion momentum indicator. Pullback = a dip back to a moving average inside a trend. Rising market = the gain disappeared once the market's own return was subtracted. New stocks = stocks that took no part in choosing the setting.*
 
 **Costs were not the explanation.** The first guess was that a one-cent spread against tight five-minute stops ate a
 small edge. A zero-cost diagnostic showed otherwise: breakouts were -0.020R +-0.028 before costs and volume reversal
@@ -279,6 +388,16 @@ in our large and mid-cap universe there were too few opportunistic buys to test 
 work finds same-day reactions to tweets about firms
 ([Ajjoub, Walker and Zhao](https://econpapers.repec.org/RePEc:eme:ijmfpp:ijmf-02-2020-0068)), but starting at the next
 open, as a slower trader must, nothing was left.
+
+### A closer look: the near miss
+
+Earnings drift came closest, so it is worth following step by step. On 149 liquid stocks it passed five of six checks: 551
+trades, +0.156R +-0.099, positive in all six years and still positive at double costs. Only the Deflated Sharpe check failed
+(0.006), because the winning setting was one of 36 tried. About half of the raw gain was the rising market (+0.090R after
+subtracting it), and the drift appeared only from 2019 on. The test that settles such a case is replication: the same setting,
+frozen, on 250 stocks that had played no part in choosing it. There the average fell to +0.025R +-0.077 (+0.023R after the
+market), the year-by-year results turned into noise (+0.06, -0.06, -0.07, +0.12, +0.20 and -0.07R), and the measured drift
+in the price reaction itself shrank from +1.13% to +0.06%.
 
 ## 6. A side question: does a trend filter make holding the market safer? (M13)
 
