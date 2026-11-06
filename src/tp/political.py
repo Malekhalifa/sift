@@ -155,3 +155,20 @@ def award_events(awards: pd.DataFrame) -> pd.DataFrame:
     df = df.groupby(["symbol", "action_date"], as_index=False)["amount"].max().rename(columns={"action_date": "ts"})
     df["ts"] = pd.to_datetime(df["ts"]).dt.tz_localize("UTC")
     return _thin(df)
+
+
+MARKET_OPEN_MIN = 9 * 60 + 30
+
+
+def post_entry_pos(ts: pd.Timestamp, sessions: pd.DatetimeIndex) -> int:
+    """Row of the first session whose OPEN is tradable after a post: that session if the post came before 09:30 ET on a
+    session day, otherwise the next session. `sessions` is a sorted index of naive session dates."""
+    local = ts.tz_convert("America/New_York")
+    day = pd.Timestamp(local.date())
+    before_open = local.hour * 60 + local.minute < MARKET_OPEN_MIN
+    return int(sessions.searchsorted(day, side="left" if before_open else "right"))
+
+
+def award_entry_pos(ts: pd.Timestamp, sessions: pd.DatetimeIndex) -> int:
+    """Row of the open of the SECOND session after the award's action date (the date, whatever session it falls on)."""
+    return int(sessions.searchsorted(pd.Timestamp(ts.date()), side="right")) + 1
