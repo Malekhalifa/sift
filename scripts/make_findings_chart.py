@@ -25,7 +25,7 @@ ROWS = [
     ("Volume-dry-up reversal (M11)", (-0.008, 0.010), (-0.010, 0.009)),
     ("High-volume continuation (M11)", (0.100, 0.019), (-0.039, 0.018)),
 ]
-BLUE, ORANGE, GREY, INK = "#1f6fb2", "#d95f02", "#c9ced3", "#1d2733"
+BLUE, ORANGE, GREY, INK = "#3a3a3a", "#8c1c33", "#cfcfcf", "#1a1a1a"
 LEFT, RIGHT, TOP, ROW_H = 395, 40, 84, 42
 LO, HI, WIDTH = -0.20, 0.30, 1040
 
@@ -36,10 +36,10 @@ def main() -> None:
     height = TOP + len(ROWS) * ROW_H + 70
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{height}" viewBox="0 0 {WIDTH} {height}" '
-        f'font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-label="Out-of-sample expectancy per trading idea">',
+        f'font-family="Latin Modern Roman, CMU Serif, Georgia, serif" role="img" aria-label="Out-of-sample expectancy per trading idea">',
         f'<rect width="{WIDTH}" height="{height}" fill="white"/>',
         f'<text x="20" y="32" font-size="22" font-weight="600" fill="{INK}">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>',
-        f'<text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Orange = after subtracting what simply holding the market earned.</text>',
+        f'<text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Red = after subtracting what simply holding the market earned.</text>',
     ]
     for tick in (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3):
         zero = tick == 0.0
@@ -51,7 +51,7 @@ def main() -> None:
     for i, (label, raw, adj) in enumerate(ROWS):
         cy = TOP + i * ROW_H + ROW_H / 2
         if i % 2 == 0:
-            out.insert(2, f'<rect x="10" y="{cy - ROW_H / 2:.1f}" width="{WIDTH - 20}" height="{ROW_H}" fill="#f6f8fa"/>')
+            out.insert(2, f'<rect x="10" y="{cy - ROW_H / 2:.1f}" width="{WIDTH - 20}" height="{ROW_H}" fill="#f6f5f4"/>')
         out.append(f'<text x="{LEFT - 14}" y="{cy + 4:.1f}" font-size="15" text-anchor="end" fill="{INK}">{label}</text>')
         for value, color, dy, shape in ((raw, BLUE, -6 if adj else 0, "circle"), (adj, ORANGE, 7, "diamond")):
             if value is None:

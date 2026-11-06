@@ -275,7 +275,7 @@ same results as a picture, with their 95% intervals.
 ![Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals](img/forest.svg)
 
 *Figure 3. Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge.
-Blue: as tested. Orange: after subtracting what simply holding the market earned over the same dates, a check added
+Grey dots: as tested. Red diamonds: after subtracting what simply holding the market earned over the same dates, a check added
 from M7 on. Lines are 95% confidence intervals.
 Terms: M4 to M11 = the milestone numbers of the tests (see the table above). RSI(2) = Relative Strength Index over 2 days, a gauge of very short-term momentum. 20/200-day = the 20-day and 200-day moving averages of the price. UT Bot = a trailing-stop trend indicator popular on charting sites; Schaff Trend Cycle (STC) = a momentum-cycle indicator. Supertrend = a trend line built from the average daily price range; Waddah Attar = a momentum-surge indicator. Form 4 = the SEC filing in which company insiders report their trades. Earnings drift = a stock keeps moving after its earnings reaction.*
 

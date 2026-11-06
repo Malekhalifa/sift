@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DIAGRAMS = ROOT / "docs" / "diagrams"
 DEFAULT_RENDERER = Path(os.environ.get("PRETTY_MERMAID_DIR", Path.home() / ".claude" / "skills" / "pretty-mermaid"))
-THEME = "nord-light"
+THEME = "zinc-light"
 
 MARKED = re.compile(r"(<!-- diagram:(?P<name>[\w-]+) -->\n)```mermaid\n.*?\n```\n(<!-- /diagram -->)", re.S)
 
@@ -53,7 +53,7 @@ def render_mermaid(source: str, png: Path, renderer: Path = DEFAULT_RENDERER, wi
     subprocess.run(
         ["node", str(renderer / "scripts" / "render.mjs"), "--input", str(mmd), "--output", str(png), "--format", "png",
          "--width", str(width), "--theme", THEME, "--transparent", "--layer-spacing", "22", "--node-spacing", "18", "--padding", "24",
-         "--fg", "#1d2733", "--line", "#4a5b73", "--border", "#8493a9", "--accent", "#1f4e79", "--surface", "#e9eef5"],
+         "--fg", "#1a1a1a", "--line", "#4d4d4d", "--border", "#7a7a7a", "--accent", "#8c1c33", "--surface", "#f4f2f0"],
         check=True, capture_output=True, text=True,
     )
 

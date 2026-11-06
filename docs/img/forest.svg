@@ -1,71 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="658" viewBox="0 0 1040 658" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-label="Out-of-sample expectancy per trading idea">
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="658" viewBox="0 0 1040 658" font-family="Latin Modern Roman, CMU Serif, Georgia, serif" role="img" aria-label="Out-of-sample expectancy per trading idea">
 <rect width="1040" height="658" fill="white"/>
-<rect x="10" y="504.0" width="1020" height="42" fill="#f6f8fa"/>
-<rect x="10" y="420.0" width="1020" height="42" fill="#f6f8fa"/>
-<rect x="10" y="336.0" width="1020" height="42" fill="#f6f8fa"/>
-<rect x="10" y="252.0" width="1020" height="42" fill="#f6f8fa"/>
-<rect x="10" y="168.0" width="1020" height="42" fill="#f6f8fa"/>
-<rect x="10" y="84.0" width="1020" height="42" fill="#f6f8fa"/>
-<text x="20" y="32" font-size="22" font-weight="600" fill="#1d2733">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>
-<text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Orange = after subtracting what simply holding the market earned.</text>
-<line x1="395.0" y1="76" x2="395.0" y2="588" stroke="#c9ced3" stroke-width="1" stroke-dasharray="3 4"/>
+<rect x="10" y="504.0" width="1020" height="42" fill="#f6f5f4"/>
+<rect x="10" y="420.0" width="1020" height="42" fill="#f6f5f4"/>
+<rect x="10" y="336.0" width="1020" height="42" fill="#f6f5f4"/>
+<rect x="10" y="252.0" width="1020" height="42" fill="#f6f5f4"/>
+<rect x="10" y="168.0" width="1020" height="42" fill="#f6f5f4"/>
+<rect x="10" y="84.0" width="1020" height="42" fill="#f6f5f4"/>
+<text x="20" y="32" font-size="22" font-weight="600" fill="#1a1a1a">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>
+<text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Red = after subtracting what simply holding the market earned.</text>
+<line x1="395.0" y1="76" x2="395.0" y2="588" stroke="#cfcfcf" stroke-width="1" stroke-dasharray="3 4"/>
 <text x="395.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">-0.2R</text>
-<line x1="516.0" y1="76" x2="516.0" y2="588" stroke="#c9ced3" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="516.0" y1="76" x2="516.0" y2="588" stroke="#cfcfcf" stroke-width="1" stroke-dasharray="3 4"/>
 <text x="516.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">-0.1R</text>
-<line x1="637.0" y1="76" x2="637.0" y2="588" stroke="#1d2733" stroke-width="1.6"/>
+<line x1="637.0" y1="76" x2="637.0" y2="588" stroke="#1a1a1a" stroke-width="1.6"/>
 <text x="637.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">0R</text>
-<line x1="758.0" y1="76" x2="758.0" y2="588" stroke="#c9ced3" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="758.0" y1="76" x2="758.0" y2="588" stroke="#cfcfcf" stroke-width="1" stroke-dasharray="3 4"/>
 <text x="758.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">+0.1R</text>
-<line x1="879.0" y1="76" x2="879.0" y2="588" stroke="#c9ced3" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="879.0" y1="76" x2="879.0" y2="588" stroke="#cfcfcf" stroke-width="1" stroke-dasharray="3 4"/>
 <text x="879.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">+0.2R</text>
-<line x1="1000.0" y1="76" x2="1000.0" y2="588" stroke="#c9ced3" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="1000.0" y1="76" x2="1000.0" y2="588" stroke="#cfcfcf" stroke-width="1" stroke-dasharray="3 4"/>
 <text x="1000.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">+0.3R</text>
-<text x="381" y="109.0" font-size="15" text-anchor="end" fill="#1d2733">Opening-range breakout, 10 stocks (M4)</text>
-<line x1="577.7" y1="105.0" x2="853.6" y2="105.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="715.7" cy="105.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="151.0" font-size="15" text-anchor="end" fill="#1d2733">Failed-breakout fade, 10 stocks (M4)</text>
-<line x1="586.2" y1="147.0" x2="687.8" y2="147.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="637.0" cy="147.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="193.0" font-size="15" text-anchor="end" fill="#1d2733">Opening-range breakout, 50 stocks (M4b)</text>
-<line x1="547.5" y1="189.0" x2="615.2" y2="189.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="581.3" cy="189.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="235.0" font-size="15" text-anchor="end" fill="#1d2733">RSI(2) mean reversion (M6)</text>
-<line x1="580.1" y1="231.0" x2="631.0" y2="231.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="605.5" cy="231.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="277.0" font-size="15" text-anchor="end" fill="#1d2733">20/200-day pullback (M6)</text>
-<line x1="564.4" y1="273.0" x2="632.2" y2="273.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="598.3" cy="273.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="319.0" font-size="15" text-anchor="end" fill="#1d2733">Earnings drift, 149 stocks (M7)</text>
-<line x1="706.0" y1="309.0" x2="945.6" y2="309.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="825.8" cy="309.0" r="4.6" fill="#1f6fb2"/>
-<line x1="632.2" y1="322.0" x2="859.6" y2="322.0" stroke="#d95f02" stroke-width="2.2"/>
-<polygon points="745.9,316.5 751.4,322.0 745.9,327.5 740.4,322.0" fill="#d95f02"/>
-<text x="381" y="361.0" font-size="15" text-anchor="end" fill="#1d2733">Same setting, 250 unseen stocks (M8)</text>
-<line x1="574.1" y1="351.0" x2="760.4" y2="351.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="667.2" cy="351.0" r="4.6" fill="#1f6fb2"/>
-<line x1="577.7" y1="364.0" x2="752.0" y2="364.0" stroke="#d95f02" stroke-width="2.2"/>
-<polygon points="664.8,358.5 670.3,364.0 664.8,369.5 659.3,364.0" fill="#d95f02"/>
-<text x="381" y="403.0" font-size="15" text-anchor="end" fill="#1d2733">UT Bot + Schaff Trend Cycle (M9)</text>
-<line x1="583.8" y1="399.0" x2="598.3" y2="399.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="591.0" cy="399.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="445.0" font-size="15" text-anchor="end" fill="#1d2733">Supertrend + Waddah Attar (M9)</text>
-<line x1="580.1" y1="441.0" x2="592.2" y2="441.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="586.2" cy="441.0" r="4.6" fill="#1f6fb2"/>
-<text x="381" y="487.0" font-size="15" text-anchor="end" fill="#1d2733">Insider buying, Form 4 (M10)</text>
-<line x1="576.5" y1="477.0" x2="765.3" y2="477.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="670.9" cy="477.0" r="4.6" fill="#1f6fb2"/>
-<line x1="462.8" y1="490.0" x2="620.1" y2="490.0" stroke="#d95f02" stroke-width="2.2"/>
-<polygon points="541.4,484.5 546.9,490.0 541.4,495.5 535.9,490.0" fill="#d95f02"/>
-<text x="381" y="529.0" font-size="15" text-anchor="end" fill="#1d2733">Volume-dry-up reversal (M11)</text>
-<line x1="615.2" y1="519.0" x2="639.4" y2="519.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="627.3" cy="519.0" r="4.6" fill="#1f6fb2"/>
-<line x1="614.0" y1="532.0" x2="635.8" y2="532.0" stroke="#d95f02" stroke-width="2.2"/>
-<polygon points="624.9,526.5 630.4,532.0 624.9,537.5 619.4,532.0" fill="#d95f02"/>
-<text x="381" y="571.0" font-size="15" text-anchor="end" fill="#1d2733">High-volume continuation (M11)</text>
-<line x1="735.0" y1="561.0" x2="781.0" y2="561.0" stroke="#1f6fb2" stroke-width="2.2"/>
-<circle cx="758.0" cy="561.0" r="4.6" fill="#1f6fb2"/>
-<line x1="568.0" y1="574.0" x2="611.6" y2="574.0" stroke="#d95f02" stroke-width="2.2"/>
-<polygon points="589.8,568.5 595.3,574.0 589.8,579.5 584.3,574.0" fill="#d95f02"/>
-<circle cx="395" cy="632" r="4.6" fill="#1f6fb2"/><text x="407" y="636" font-size="14" fill="#1d2733">result as tested</text>
-<polygon points="585,626.5 590.5,632 585,637.5 579.5,632" fill="#d95f02"/><text x="599" y="636" font-size="14" fill="#1d2733">after subtracting the market (checked from M7 on)</text>
+<text x="381" y="109.0" font-size="15" text-anchor="end" fill="#1a1a1a">Opening-range breakout, 10 stocks (M4)</text>
+<line x1="577.7" y1="105.0" x2="853.6" y2="105.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="715.7" cy="105.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="151.0" font-size="15" text-anchor="end" fill="#1a1a1a">Failed-breakout fade, 10 stocks (M4)</text>
+<line x1="586.2" y1="147.0" x2="687.8" y2="147.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="637.0" cy="147.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="193.0" font-size="15" text-anchor="end" fill="#1a1a1a">Opening-range breakout, 50 stocks (M4b)</text>
+<line x1="547.5" y1="189.0" x2="615.2" y2="189.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="581.3" cy="189.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="235.0" font-size="15" text-anchor="end" fill="#1a1a1a">RSI(2) mean reversion (M6)</text>
+<line x1="580.1" y1="231.0" x2="631.0" y2="231.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="605.5" cy="231.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="277.0" font-size="15" text-anchor="end" fill="#1a1a1a">20/200-day pullback (M6)</text>
+<line x1="564.4" y1="273.0" x2="632.2" y2="273.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="598.3" cy="273.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="319.0" font-size="15" text-anchor="end" fill="#1a1a1a">Earnings drift, 149 stocks (M7)</text>
+<line x1="706.0" y1="309.0" x2="945.6" y2="309.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="825.8" cy="309.0" r="4.6" fill="#3a3a3a"/>
+<line x1="632.2" y1="322.0" x2="859.6" y2="322.0" stroke="#8c1c33" stroke-width="2.2"/>
+<polygon points="745.9,316.5 751.4,322.0 745.9,327.5 740.4,322.0" fill="#8c1c33"/>
+<text x="381" y="361.0" font-size="15" text-anchor="end" fill="#1a1a1a">Same setting, 250 unseen stocks (M8)</text>
+<line x1="574.1" y1="351.0" x2="760.4" y2="351.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="667.2" cy="351.0" r="4.6" fill="#3a3a3a"/>
+<line x1="577.7" y1="364.0" x2="752.0" y2="364.0" stroke="#8c1c33" stroke-width="2.2"/>
+<polygon points="664.8,358.5 670.3,364.0 664.8,369.5 659.3,364.0" fill="#8c1c33"/>
+<text x="381" y="403.0" font-size="15" text-anchor="end" fill="#1a1a1a">UT Bot + Schaff Trend Cycle (M9)</text>
+<line x1="583.8" y1="399.0" x2="598.3" y2="399.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="591.0" cy="399.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="445.0" font-size="15" text-anchor="end" fill="#1a1a1a">Supertrend + Waddah Attar (M9)</text>
+<line x1="580.1" y1="441.0" x2="592.2" y2="441.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="586.2" cy="441.0" r="4.6" fill="#3a3a3a"/>
+<text x="381" y="487.0" font-size="15" text-anchor="end" fill="#1a1a1a">Insider buying, Form 4 (M10)</text>
+<line x1="576.5" y1="477.0" x2="765.3" y2="477.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="670.9" cy="477.0" r="4.6" fill="#3a3a3a"/>
+<line x1="462.8" y1="490.0" x2="620.1" y2="490.0" stroke="#8c1c33" stroke-width="2.2"/>
+<polygon points="541.4,484.5 546.9,490.0 541.4,495.5 535.9,490.0" fill="#8c1c33"/>
+<text x="381" y="529.0" font-size="15" text-anchor="end" fill="#1a1a1a">Volume-dry-up reversal (M11)</text>
+<line x1="615.2" y1="519.0" x2="639.4" y2="519.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="627.3" cy="519.0" r="4.6" fill="#3a3a3a"/>
+<line x1="614.0" y1="532.0" x2="635.8" y2="532.0" stroke="#8c1c33" stroke-width="2.2"/>
+<polygon points="624.9,526.5 630.4,532.0 624.9,537.5 619.4,532.0" fill="#8c1c33"/>
+<text x="381" y="571.0" font-size="15" text-anchor="end" fill="#1a1a1a">High-volume continuation (M11)</text>
+<line x1="735.0" y1="561.0" x2="781.0" y2="561.0" stroke="#3a3a3a" stroke-width="2.2"/>
+<circle cx="758.0" cy="561.0" r="4.6" fill="#3a3a3a"/>
+<line x1="568.0" y1="574.0" x2="611.6" y2="574.0" stroke="#8c1c33" stroke-width="2.2"/>
+<polygon points="589.8,568.5 595.3,574.0 589.8,579.5 584.3,574.0" fill="#8c1c33"/>
+<circle cx="395" cy="632" r="4.6" fill="#3a3a3a"/><text x="407" y="636" font-size="14" fill="#1a1a1a">result as tested</text>
+<polygon points="585,626.5 590.5,632 585,637.5 579.5,632" fill="#8c1c33"/><text x="599" y="636" font-size="14" fill="#1a1a1a">after subtracting the market (checked from M7 on)</text>
 </svg>

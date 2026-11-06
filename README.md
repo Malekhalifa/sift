@@ -40,7 +40,7 @@ they were repeated on stocks they had never seen. No money was traded.
   <img src="docs/img/forest.svg" alt="Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals" width="900">
 </p>
 
-<sub>Dot = result after costs, line = 95% confidence interval, zero = no edge. Orange = after subtracting what simply holding the market earned. R = profit in units of the amount risked per trade.</sub>
+<sub>Dot = result after costs, line = 95% confidence interval, zero = no edge. Red diamond = after subtracting what simply holding the market earned. R = profit in units of the amount risked per trade.</sub>
 
 ## The twelve ideas and what happened
 

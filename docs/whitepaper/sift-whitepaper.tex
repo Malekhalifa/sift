@@ -1,67 +1,42 @@
-% Sift whitepaper. Build: uv run python scripts/build_report.py  (XeLaTeX, run twice for references)
+% Sift whitepaper. Build: uv run python scripts/build_report.py  (XeLaTeX, three passes for references)
+% Classic LaTeX article layout in Latin Modern, the default LaTeX typeface.
 \documentclass[11pt,a4paper]{article}
 
 % ---------------------------------------------------------------- fonts and layout
-\usepackage{fontspec}
-\setmainfont{Charter}
-\setsansfont{Avenir Next}
-\setmonofont{Menlo}[Scale=0.85]
-\usepackage[a4paper,top=2.6cm,bottom=2.6cm,left=2.6cm,right=2.6cm,headheight=14pt]{geometry}
+\usepackage{fontspec}            % Latin Modern by default; fontspec gives Unicode minus and plus-minus signs
+\usepackage[a4paper,margin=2.5cm,headheight=14pt]{geometry}
 \usepackage{microtype}
 \usepackage[table]{xcolor}
-\usepackage{graphicx,calc,array,booktabs,etoolbox,float,needspace,enumitem,lastpage,tikz}
+\usepackage{graphicx,calc,array,booktabs,etoolbox,float,needspace,enumitem,lastpage}
 \usepackage[most]{tcolorbox}
-\linespread{1.08}
-\setlength{\parindent}{0pt}
-\setlength{\parskip}{0.55em}
 \setlength{\emergencystretch}{3em}
 \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-\setlist{leftmargin=1.4em,itemsep=2pt,topsep=4pt}
+\setlist{itemsep=2pt,topsep=4pt}
 
-% ---------------------------------------------------------------- colours
-\definecolor{accent}{HTML}{1F4E79}
-\definecolor{accentdeep}{HTML}{13304F}
-\definecolor{highlight}{HTML}{E07B24}
-\definecolor{ink}{HTML}{1D2733}
-\definecolor{muted}{HTML}{66717D}
-\definecolor{rowshade}{HTML}{F1F4F8}
-\definecolor{boxback}{HTML}{EEF3F9}
+% ---------------------------------------------------------------- colours: burgundy accent, greys
+\definecolor{accent}{HTML}{8C1C33}
+\definecolor{muted}{HTML}{5F5F5F}
+\definecolor{boxback}{HTML}{F5F3F1}
 
-% ---------------------------------------------------------------- headings: numbered, sans, accent numbers
-\usepackage{titlesec}
-\titleformat{\section}{\sffamily\Large\bfseries\color{ink}}{\color{accent}\thesection}{0.7em}{}[\vspace{2pt}{\color{accent!25}\titlerule[0.8pt]}]
-\titleformat{\subsection}{\sffamily\large\bfseries\color{ink}}{\color{accent}\thesubsection}{0.6em}{}
-\titlespacing*{\section}{0pt}{3ex plus 1ex minus .2ex}{1.5ex}
-\titlespacing*{\subsection}{0pt}{2.4ex plus .8ex minus .2ex}{0.8ex}
+% ---------------------------------------------------------------- headings: keep with what follows
 \pretocmd{\section}{\Needspace{10\baselineskip}}{}{}
 \pretocmd{\subsection}{\Needspace{7\baselineskip}}{}{}
-
-% ---------------------------------------------------------------- contents
-\usepackage{tocloft}
-\renewcommand{\cfttoctitlefont}{\sffamily\LARGE\bfseries\color{accent}}
-\renewcommand{\cftsecfont}{\sffamily\bfseries}
-\renewcommand{\cftsecpagefont}{\sffamily\bfseries}
-\renewcommand{\cftsubsecfont}{\sffamily\small}
-\renewcommand{\cftsubsecpagefont}{\sffamily\small}
-\setlength{\cftbeforesecskip}{6pt}
 \setcounter{tocdepth}{2}
 
 % ---------------------------------------------------------------- header and footer
 \usepackage{fancyhdr}
 \pagestyle{fancy}
 \fancyhf{}
-\renewcommand{\sectionmark}[1]{\markboth{\thesection\quad #1}{}}
-\fancyhead[L]{\sffamily\scriptsize\color{muted}\textbf{\color{accent}SIFT}\quad Whitepaper}
-\fancyhead[R]{\sffamily\scriptsize\color{muted}\leftmark}
-\fancyfoot[L]{\sffamily\scriptsize\color{muted}Twelve trading ideas, tested honestly on free data}
-\fancyfoot[R]{\sffamily\scriptsize\color{muted}Page \textbf{\color{accent}\thepage} of \pageref{LastPage}}
+\renewcommand{\sectionmark}[1]{\markboth{\thesection.\ #1}{}}
+\fancyhead[L]{\small\itshape Sift Whitepaper}
+\fancyhead[R]{\small\itshape\nouppercase{\leftmark}}
+\fancyfoot[C]{\small\thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.4pt}
-\renewcommand{\headrule}{\hbox to\headwidth{\color{accent!25}\leaders\hrule height \headrulewidth\hfill}}
-\fancypagestyle{plain}{\fancyhf{}\fancyfoot[R]{\sffamily\scriptsize\color{muted}Page \textbf{\color{accent}\thepage} of \pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage\ of \pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}}
 
 % ---------------------------------------------------------------- figures, tables, captions
 \usepackage{caption}
-\captionsetup{font={small,sf},labelfont={bf,color=accent},labelsep=colon,justification=raggedright,singlelinecheck=false,skip=6pt}
+\captionsetup{font=small,labelfont=bf,labelsep=colon,justification=justified,singlelinecheck=true,skip=6pt}
 \captionsetup[table]{position=top,skip=4pt}
 \renewcommand{\topfraction}{0.9}
 \renewcommand{\bottomfraction}{0.7}
@@ -69,50 +44,48 @@
 \renewcommand{\floatpagefraction}{0.8}
 \setcounter{topnumber}{2}
 \setcounter{totalnumber}{3}
-\AtBeginEnvironment{table}{\sffamily\footnotesize\setlength{\tabcolsep}{5pt}\renewcommand{\arraystretch}{1.25}\rowcolors{2}{rowshade}{white}}
-\newcommand{\figterms}[1]{\par\vspace{3pt}{\raggedright\sffamily\scriptsize\color{muted}\textbf{Terms.} #1\par}}
+\AtBeginEnvironment{table}{\small\setlength{\tabcolsep}{5pt}\renewcommand{\arraystretch}{1.2}}
+\newcommand{\figterms}[1]{\par\vspace{3pt}{\footnotesize\color{muted}\textit{Terms.} #1\par}}
 
 % ---------------------------------------------------------------- boxes
-\newtcolorbox{keybox}[1]{enhanced,breakable,colback=boxback,colframe=accent,boxrule=0pt,leftrule=3.5pt,arc=0pt,outer arc=0pt,
-  left=12pt,right=12pt,top=8pt,bottom=8pt,before skip=10pt,after skip=12pt,fontupper=\sffamily\small\color{ink},
-  title={#1},coltitle=accent,fonttitle=\sffamily\bfseries,colbacktitle=boxback,attach title to upper={\par\vspace{3pt}}}
+\newtcolorbox{keybox}[1]{enhanced,breakable,colback=boxback,colframe=accent,boxrule=0.6pt,arc=0pt,outer arc=0pt,
+  left=10pt,right=10pt,top=6pt,bottom=6pt,before skip=10pt,after skip=12pt,
+  title={#1},fonttitle=\bfseries,coltitle=white,colbacktitle=accent}
 
 % ---------------------------------------------------------------- links and metadata
 \usepackage{hyperref}
 \hypersetup{colorlinks=true,linkcolor=accent,urlcolor=accent,citecolor=accent,
   pdftitle={Sift: twelve trading ideas, tested honestly on free data},
+  pdfauthor={Malek Khalifa},
   pdfsubject={A pre-registered negative-results whitepaper on short-term US stock strategies},
   pdfkeywords={backtesting, pre-registration, deflated Sharpe ratio, walk-forward, trading strategies}}
 \urlstyle{same}
 
 \begin{document}
-\color{ink}
 
 % ================================================================ title page
 \begin{titlepage}
-\thispagestyle{empty}
-\begin{tikzpicture}[remember picture,overlay]
-  \fill[accentdeep] (current page.north west) rectangle ([yshift=-3.6cm]current page.north east);
-  \fill[highlight] ([yshift=-3.6cm]current page.north west) rectangle ([yshift=-3.75cm]current page.north east);
-  \node[anchor=west,inner sep=0] (logo) at ([xshift=2.6cm,yshift=-1.8cm]current page.north west) {\includegraphics[width=1.5cm]{figures/icon.pdf}};
-  \node[anchor=west,text=white,font=\sffamily\bfseries\fontsize{24}{28}\selectfont] at ([xshift=0.4cm]logo.east) {Sift};
-  \node[anchor=east,text=white!80!accent,font=\sffamily\small\bfseries] at ([xshift=-2.6cm,yshift=-1.8cm]current page.north east) {WHITEPAPER \quad\textbar\quad VERSION 1.0};
-\end{tikzpicture}
-
-\vspace*{3.6cm}
-{\sffamily\small\bfseries\color{highlight} RESEARCH WHITEPAPER\par}
-\vspace{0.35cm}
-{\sffamily\bfseries\fontsize{32}{38}\selectfont\color{ink} Twelve trading ideas,\\ tested honestly on free data\par}
-\vspace{0.45cm}
-{\sffamily\Large\color{muted} A pre-registered negative-results study of short-term US stock strategies\par}
-\vspace{0.9cm}
-{\sffamily\small\color{ink}\textbf{Malek Khalifa}\quad\textcolor{muted}{\textbar}\quad 6 November 2026\quad\textcolor{muted}{\textbar}\quad \href{https://github.com/Malekhalifa/sift}{github.com/Malekhalifa/sift}\par}
-\vspace{0.8cm}
-{\color{accent!25}\rule{\linewidth}{0.8pt}}\par
+\centering
+\vspace*{1.5cm}
+{\scshape\large Research Whitepaper\par}
+\vspace{1.2cm}
+{\color{accent}\rule{\linewidth}{1pt}}\par
+\vspace{0.5cm}
+{\huge\bfseries Twelve Trading Ideas,\\[4pt] Tested Honestly on Free Data\par}
+\vspace{0.4cm}
+{\Large A Pre-Registered Negative-Results Study\\ of Short-Term US Stock Strategies\par}
+\vspace{0.5cm}
+{\color{accent}\rule{\linewidth}{1pt}}\par
+\vspace{1.1cm}
+{\Large Malek Khalifa\par}
 \vspace{0.3cm}
-{\sffamily\bfseries\color{accent} Abstract\par}
-\vspace{0.1cm}
-{\small
+{\large The Sift project \quad\textperiodcentered\quad \href{https://github.com/Malekhalifa/sift}{github.com/Malekhalifa/sift}\par}
+\vspace{0.3cm}
+{\large 6 November 2026 \quad\textperiodcentered\quad Version 1.0\par}
+\vspace{1.4cm}
+\begin{minipage}{0.88\linewidth}
+\begin{center}\bfseries Abstract\end{center}
+\small
 Trading strategies spread online because they are easy to describe and easy to believe. This paper asks whether any of
 them survive a fair test, starting from \$0 and using only free data. It describes \textbf{Sift}, a research pipeline that
 downloads market data, turns each trading idea into exact rules, simulates the trades with realistic costs, and judges the
@@ -123,9 +96,10 @@ opening-range breakouts and fades, RSI reversion, trend pullbacks, earnings drif
 popular in online videos, volume-conditioned rules, presidential social-media posts and Pentagon contract awards.
 \textbf{None met all of its pre-registered criteria.} The ideas that looked strongest were either the market's own rise
 or luck that did not repeat on new stocks. The contribution is a method and a set of lessons about how backtests flatter
-themselves, not a strategy.\par}
+themselves, not a strategy.
+\end{minipage}
 \vfill
-{\sffamily\scriptsize\color{muted}
+{\footnotesize\color{muted}
 \textbf{Disclaimer.} A personal research project. It is not investment advice and recommends no security or strategy;
 no real money was traded. The code, analysis and drafting were done with an AI coding assistant; every number comes from
 results recorded in the project repository, whose commit history records when each protocol was written.\par}
@@ -146,13 +120,13 @@ down before testing, and judged out of sample by seven fixed criteria. The 2025 
 check that no idea earned.
 
 \begin{center}
-\begin{tikzpicture}
-  \foreach \x/\num/\lab in {0/12/ideas tested, 3.15/0/passed every check, 6.3/298/configurations counted, 9.45/410/US stocks at most, 12.6/9/years of data}
-  {
-    \node[anchor=north west,inner sep=0,text=accent,font=\sffamily\bfseries\fontsize{24}{28}\selectfont] at (\x,0) {\num};
-    \node[anchor=north west,inner sep=0,text width=2.7cm,text=muted,font=\sffamily\scriptsize] at (\x,-0.95) {\lab};
-  }
-\end{tikzpicture}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}*{5}{>{\centering\arraybackslash}p{0.17\linewidth}}@{}}
+{\color{accent}\fontsize{24}{28}\selectfont\bfseries 12} & {\color{accent}\fontsize{24}{28}\selectfont\bfseries 0} &
+{\color{accent}\fontsize{24}{28}\selectfont\bfseries 298} & {\color{accent}\fontsize{24}{28}\selectfont\bfseries 410} &
+{\color{accent}\fontsize{24}{28}\selectfont\bfseries 9} \\[2pt]
+\small ideas tested & \small passed every check & \small configurations counted & \small US stocks at most & \small years of data \\
+\end{tabular}
 \end{center}
 
 \begin{keybox}{Key findings}
@@ -516,7 +490,7 @@ M12 & Large Pentagon awards to listed primes & 933 events & −0.10\% ±0.27 per
 \begin{figure}[tbp]
 \centering
 \includegraphics[width=1.0\linewidth]{figures/forest.pdf}
-\caption[Out-of-sample result per trade, in R (profit measured in units of the amount risked)]{Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge. Blue: as tested. Orange: after subtracting what simply holding the market earned over the same dates, a check added from M7 on. Lines are 95\% confidence intervals.}
+\caption[Out-of-sample result per trade, in R (profit measured in units of the amount risked)]{Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge. Grey dots: as tested. Red diamonds: after subtracting what simply holding the market earned over the same dates, a check added from M7 on. Lines are 95\% confidence intervals.}
 \label{fig:forest}
 \figterms{M4 to M11 = the milestone numbers of the tests (see Table \ref{tbl:results}). RSI(2) = Relative Strength Index over 2 days, a gauge of very short-term momentum. 20/200-day = the 20-day and 200-day moving averages of the price. UT Bot = a trailing-stop trend indicator popular on charting sites; Schaff Trend Cycle (STC) = a momentum-cycle indicator. Supertrend = a trend line built from the average daily price range; Waddah Attar = a momentum-surge indicator. Form 4 = the SEC filing in which company insiders report their trades. Earnings drift = a stock keeps moving after its earnings reaction.}
 \end{figure}
@@ -785,13 +759,12 @@ Start with \texttt{README.md}, then \texttt{docs/m4-protocol.md} for the method 
 
 % ================================================================ appendices
 \appendix
-\renewcommand{\thesection}{\Alph{section}}
 
 \section{Glossary}\label{app:glossary}
 
 Every abbreviation and technical term used in the paper, in alphabetical order.
 
-\begin{description}[style=sameline,leftmargin=4.4cm,labelwidth=4.2cm,labelsep=0.2cm,font=\sffamily\bfseries\small\color{accent},itemsep=3pt]
+\begin{description}[style=sameline,leftmargin=4.4cm,labelwidth=4.2cm,labelsep=0.2cm,font=\bfseries,itemsep=3pt]
   \item[ADX] Average Directional Index: a measure of how strongly a market is trending.
   \item[ATR] Average True Range: the typical daily price range of a stock, used to size stops.
   \item[Backtest] Replaying historical data to see what a fixed rule would have done.
@@ -860,6 +833,7 @@ taken from results recorded in the repository, and the protocols' commit order i
 
 % ================================================================ references
 \renewcommand{\refname}{References}
+\small
 \begin{thebibliography}{9}
 \addcontentsline{toc}{section}{References}
 \bibitem{bailey2014} D.~H. Bailey and M. L\'opez de Prado, ``The Deflated Sharpe Ratio: Correcting for Selection Bias,
