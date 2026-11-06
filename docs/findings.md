@@ -5,7 +5,8 @@
 Report date: 6 November 2026. Status: complete for the free-data scope described below. Data after 2024 has never been
 analysed (see the holdout rule in section 3).
 
-A typeset PDF of this report is in [Trading-Research-Findings.pdf](Trading-Research-Findings.pdf).
+The typeset whitepaper version is [Trading-Research-Findings.pdf](Trading-Research-Findings.pdf); its LaTeX source is
+[whitepaper/sift-whitepaper.tex](whitepaper/sift-whitepaper.tex).
 
 ## Abstract
 
@@ -462,7 +463,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 ## 10. Reproduce it
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(212 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(208 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 ```sh
 uv sync

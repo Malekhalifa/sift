@@ -1,10 +1,11 @@
-"""Sync the Mermaid diagrams into the markdown files and build the research PDF.
+"""Sync the Mermaid diagrams into the markdown files and build the research whitepaper (LaTeX).
 
-    uv run python scripts/build_report.py            # sync diagrams, then build docs/Trading-Research-Findings.pdf
+    uv run python scripts/build_report.py            # sync diagrams, then typeset docs/whitepaper/sift-whitepaper.tex into
+                                                     # docs/Trading-Research-Findings.pdf
     uv run python scripts/build_report.py --sync     # only rewrite the diagram blocks in the markdown files
     uv run python scripts/build_report.py --check    # exit 1 if any markdown file's diagrams differ from docs/diagrams/*.mmd
 
-Needs pandoc, XeLaTeX, rsvg-convert and Node, plus the Pretty Mermaid renderer (see src/tp/report.py).
+Needs XeLaTeX, rsvg-convert and Node, plus the Pretty Mermaid renderer (see src/tp/report.py).
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def main() -> int:
         path.write_text(report.sync_diagrams(path.read_text()))
     if args.sync:
         return 0
-    report.build_pdf(report.ROOT / "docs" / "findings.md", PDF)
+    report.build_whitepaper(PDF)
     print(f"wrote {PDF}")
     return 0
 

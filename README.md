@@ -9,13 +9,13 @@
 A pre-registered research pipeline that tests short-term US stock strategies on free data,<br>
 and catches the ideas that only look like they work.
 
-![tests](https://img.shields.io/badge/tests-212%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-208%20passing-2ea44f)
 ![python](https://img.shields.io/badge/python-3.12%2B-3776ab)
 ![status](https://img.shields.io/badge/status-research%20complete-1f4e79)
 ![holdout](https://img.shields.io/badge/2025%2B%20holdout-untouched-d95f02)
 ![capital](https://img.shields.io/badge/real%20money%20traded-%240-lightgrey)
 
-**[Read the report (PDF)](docs/Trading-Research-Findings.pdf)** &nbsp;·&nbsp; [Findings](docs/findings.md) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [All results](#all-results) &nbsp;·&nbsp; [Get started](#get-started)
+**[Read the whitepaper (PDF)](docs/Trading-Research-Findings.pdf)** &nbsp;·&nbsp; [Findings](docs/findings.md) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [All results](#all-results) &nbsp;·&nbsp; [Get started](#get-started)
 
 </div>
 
@@ -96,7 +96,7 @@ flowchart TD
 5. **Paper trading.** A loop for a broker's paper account, built for the day an idea passes. None did.
 
 **Tech stack:** Python 3.12+ with `uv`, pandas and Parquet for a split-safe bar store, Alpaca's free market-data tier, SEC EDGAR,
-USAspending.gov, a SQLite trial registry, pytest, and Mermaid with pandoc/XeLaTeX for the report.
+USAspending.gov, a SQLite trial registry, pytest, and Mermaid and LaTeX (XeLaTeX) for the whitepaper.
 
 ## How the tests stay honest
 
@@ -152,7 +152,7 @@ flowchart LR
 4. **Treat screenshots, reels and "I made X overnight" claims as hypotheses.** They deserve the same test, and most fail it.
 5. **A clear "no" is a result.** It saved capital, and the method now makes the next question cheap to test.
 
-Read the full write-up in the [report (PDF)](docs/Trading-Research-Findings.pdf) or [docs/findings.md](docs/findings.md).
+Read the full write-up in the [whitepaper (PDF)](docs/Trading-Research-Findings.pdf) or [docs/findings.md](docs/findings.md).
 
 ## All results
 
@@ -177,9 +177,9 @@ M0 to M3 and M5 are infrastructure: decisions, a data-depth probe, the recorder,
 ```sh
 uv sync
 cp .env.example .env        # fill in the Alpaca paper keys; .env is gitignored
-uv run pytest               # 212 tests
+uv run pytest               # 208 tests
 uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml   # rerun one pre-registered sweep
-uv run python scripts/build_report.py                                    # rebuild the PDF (needs pandoc + XeLaTeX)
+uv run python scripts/build_report.py                                    # rebuild the whitepaper PDF (needs XeLaTeX)
 ```
 
 ```text
@@ -281,7 +281,7 @@ Overfitting guards:
 - **Trial registry.** Every run is appended to `data/trials.sqlite`. The count per strategy feeds the Deflated Sharpe check.
 - **Holdout.** Data from `config.HOLDOUT_START` (2025-01-01) is refused unless `--use-holdout` is passed, and such runs are flagged. Keep it for the final validation only.
 
-Verification: the test suite (212 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
+Verification: the test suite (208 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
 
 #### Baseline result (plumbing check, not a finding)
 
