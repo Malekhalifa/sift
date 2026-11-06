@@ -5,6 +5,8 @@
 Report date: 6 November 2026. Status: complete for the free-data scope described below. Data after 2024 has never been
 analysed (see the holdout rule in section 2).
 
+A typeset PDF of this report is in [Trading-Research-Findings.pdf](Trading-Research-Findings.pdf).
+
 ## Abstract
 
 I set out to build a pipeline that could find a short-term trading edge in US stocks starting from zero capital, and to
@@ -51,12 +53,51 @@ then paper trades, with real money considered only after a proven edge. Constrai
 - Universe chosen by a fixed rule (median dollar volume in Q1 2016), never by hand: 10 large caps, then 50, 150 and 250
   further stocks (about 410 in total).
 
+<!-- diagram:pipeline -->
+```mermaid
+flowchart TD
+  subgraph SRC[Free data sources]
+    A1[Alpaca bars, 2016 onward]
+    A2[SEC EDGAR filings]
+    A3[USAspending, post archives]
+  end
+  SRC --> B[Recorder: split-safe local store]
+  B --> C[Strategies emit entry, stop, target]
+  C --> D[Backtest engine: next-bar fills and costs]
+  D --> E[Walk-forward test, 2019 to 2024]
+  E --> F{All checks passed?}
+  F -- no --> G[Idea closed, trials counted]
+  F -- yes --> H[One run on holdout, 2025 onward]
+  H --> I[Paper trading]
+  I --> J[Real money only after proof]
+```
+<!-- /diagram -->
+
+*Figure 2. The pipeline. Data flows from free sources through a split-safe store into strategies and a cost-aware backtest; only an idea that passes every check reaches the holdout, and only after that paper trading.*
+
 ## 2. How the tests were kept honest
 
 Most backtests that look good are noise that was selected. The framework was built to make that hard.
 
+<!-- diagram:method -->
+```mermaid
+flowchart TD
+  I[New idea] --> P[Pre-register: protocol, grid, pass criteria]
+  P --> R[Run once: walk-forward 2019 to 2024, minus the market, every trial counted]
+  R --> Q{All checks pass?}
+  Q -- no --> X[Close the idea, publish the result]
+  Q -- yes --> U[Repeat on unseen stocks]
+  U --> V{Still passes?}
+  V -- no --> X
+  V -- yes --> H[One run on the holdout, 2025 onward]
+  H --> T[Paper trade, then real money]
+```
+<!-- /diagram -->
+
+*Figure 3. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.*
+
 | Safeguard | What it does |
-|---|---|
+|----------|----------------------------------|
 | **Pre-registration** | For each test the protocol, parameter grid and pass criteria were committed to version control before the run. The commit history shows the order, so it cannot be quietly changed afterwards. |
 | **Walk-forward, out of sample** | Parameters are chosen on earlier years only and judged on the next. Test years were 2019 to 2024. |
 | **Untouched holdout** | Data from 2025 onward is kept for a single final run, and only for an idea that has already passed everything. The code refuses to read it without an explicit flag. No analysis has read it. |
@@ -76,7 +117,7 @@ what it risked, after costs.
 ## 3. Results
 
 | Milestone | Idea | Data | Out-of-sample result (95% interval) | Checks passed |
-|---|---|---|---|---|
+|--------|-------------------------|--------------------|--------------------|--------|
 | M4 | Opening-range breakout | 10 large caps, 5-min bars | +0.065R +-0.114 | 3 of 6 |
 | M4 | Failed-breakout fade | same | -0.000R +-0.042 | 1 of 6 |
 | M4b | Opening-range breakout | 50 fresh stocks | -0.046R +-0.028 | 1 of 6 |
@@ -98,6 +139,30 @@ so it has its own four criteria. "M4" and "M4b" are the ten-stock and fifty-stoc
 Details, protocols and per-year numbers for each row are in `docs/m*-protocol.md` and `docs/m*-results.md`.
 
 ## 4. What kept recurring
+
+<!-- diagram:verdicts -->
+```mermaid
+flowchart LR
+  R[12 ideas tested] --> G1[No edge even before costs]
+  R --> G2[The gain was the rising market]
+  R --> G3[Did not replicate on new stocks]
+  R --> G4[Nothing left after the first open]
+  G1 --> a1[Failed-breakout fade]
+  G1 --> a2[RSI 2 reversion]
+  G1 --> a3[200-day pullback]
+  G1 --> a4[UT Bot + STC]
+  G1 --> a5[Supertrend + Waddah]
+  G1 --> a6[Volume-dry-up reversal]
+  G2 --> b1[Insider buying]
+  G2 --> b2[High-volume continuation]
+  G3 --> c1[Earnings drift]
+  G3 --> c2[Opening-range breakout]
+  G4 --> d1[Presidential posts]
+  G4 --> d2[Pentagon awards]
+```
+<!-- /diagram -->
+
+*Figure 4. Why each idea failed, by main reason. Several had more than one: the breakout, for example, also showed a faint edge on 10 stocks that vanished on 50.*
 
 **Costs were not the explanation.** The first guess was that a one-cent spread against tight five-minute stops ate a
 small edge. A zero-cost diagnostic showed otherwise: breakouts were -0.020R +-0.028 before costs and volume reversal
@@ -179,8 +244,10 @@ Everything is in the project repository: code, each protocol (committed before i
 ```sh
 uv sync
 uv run pytest
-uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml   # example: one pre-registered sweep
+uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml
 ```
+
+The last command reruns one pre-registered sweep (insider buying).
 
 Start with `README.md`, then `docs/m4-protocol.md` for the method and `docs/m*-results.md` for each result.
 

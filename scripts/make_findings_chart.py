@@ -26,8 +26,8 @@ ROWS = [
     ("High-volume continuation (M11)", (0.100, 0.019), (-0.039, 0.018)),
 ]
 BLUE, ORANGE, GREY, INK = "#1f6fb2", "#d95f02", "#c9ced3", "#1d2733"
-LEFT, RIGHT, TOP, ROW_H = 330, 40, 78, 38
-LO, HI, WIDTH = -0.20, 0.30, 960
+LEFT, RIGHT, TOP, ROW_H = 395, 40, 84, 42
+LO, HI, WIDTH = -0.20, 0.30, 1040
 
 
 def main() -> None:
@@ -38,8 +38,8 @@ def main() -> None:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{height}" viewBox="0 0 {WIDTH} {height}" '
         f'font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-label="Out-of-sample expectancy per trading idea">',
         f'<rect width="{WIDTH}" height="{height}" fill="white"/>',
-        f'<text x="20" y="30" font-size="19" font-weight="600" fill="{INK}">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>',
-        f'<text x="20" y="52" font-size="13" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Orange = after subtracting what simply holding the market earned.</text>',
+        f'<text x="20" y="32" font-size="22" font-weight="600" fill="{INK}">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>',
+        f'<text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Orange = after subtracting what simply holding the market earned.</text>',
     ]
     for tick in (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3):
         zero = tick == 0.0
@@ -47,12 +47,12 @@ def main() -> None:
         out.append(f'<line x1="{x(tick):.1f}" y1="{TOP - 8}" x2="{x(tick):.1f}" y2="{TOP + len(ROWS) * ROW_H}" '
                    f'stroke="{INK if zero else GREY}" stroke-width="{1.6 if zero else 1}"{dash}/>')
         name = "0R" if zero else f"{tick:+.1f}R"
-        out.append(f'<text x="{x(tick):.1f}" y="{TOP + len(ROWS) * ROW_H + 20}" font-size="12" text-anchor="middle" fill="#5b6672">{name}</text>')
+        out.append(f'<text x="{x(tick):.1f}" y="{TOP + len(ROWS) * ROW_H + 20}" font-size="14" text-anchor="middle" fill="#5b6672">{name}</text>')
     for i, (label, raw, adj) in enumerate(ROWS):
         cy = TOP + i * ROW_H + ROW_H / 2
         if i % 2 == 0:
             out.insert(2, f'<rect x="10" y="{cy - ROW_H / 2:.1f}" width="{WIDTH - 20}" height="{ROW_H}" fill="#f6f8fa"/>')
-        out.append(f'<text x="{LEFT - 14}" y="{cy + 4:.1f}" font-size="13" text-anchor="end" fill="{INK}">{label}</text>')
+        out.append(f'<text x="{LEFT - 14}" y="{cy + 4:.1f}" font-size="15" text-anchor="end" fill="{INK}">{label}</text>')
         for value, color, dy, shape in ((raw, BLUE, -6 if adj else 0, "circle"), (adj, ORANGE, 7, "diamond")):
             if value is None:
                 continue
@@ -67,9 +67,9 @@ def main() -> None:
                 out.append(f'<polygon points="{cx:.1f},{y - 5.5:.1f} {cx + 5.5:.1f},{y:.1f} {cx:.1f},{y + 5.5:.1f} {cx - 5.5:.1f},{y:.1f}" fill="{color}"/>')
     ly = height - 22
     out += [
-        f'<circle cx="{LEFT}" cy="{ly - 4}" r="4.6" fill="{BLUE}"/><text x="{LEFT + 12}" y="{ly}" font-size="12" fill="{INK}">result as tested</text>',
-        f'<polygon points="{LEFT + 150},{ly - 9.5} {LEFT + 155.5},{ly - 4} {LEFT + 150},{ly + 1.5} {LEFT + 144.5},{ly - 4}" fill="{ORANGE}"/>'
-        f'<text x="{LEFT + 164}" y="{ly}" font-size="12" fill="{INK}">after subtracting the market (checked from M7 on)</text>',
+        f'<circle cx="{LEFT}" cy="{ly - 4}" r="4.6" fill="{BLUE}"/><text x="{LEFT + 12}" y="{ly}" font-size="14" fill="{INK}">result as tested</text>',
+        f'<polygon points="{LEFT + 190},{ly - 9.5} {LEFT + 195.5},{ly - 4} {LEFT + 190},{ly + 1.5} {LEFT + 184.5},{ly - 4}" fill="{ORANGE}"/>'
+        f'<text x="{LEFT + 204}" y="{ly}" font-size="14" fill="{INK}">after subtracting the market (checked from M7 on)</text>',
         "</svg>",
     ]
     path = Path(__file__).resolve().parents[1] / "docs" / "img" / "forest.svg"

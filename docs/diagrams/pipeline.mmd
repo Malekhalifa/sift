@@ -1,0 +1,15 @@
+flowchart TD
+  subgraph SRC[Free data sources]
+    A1[Alpaca bars, 2016 onward]
+    A2[SEC EDGAR filings]
+    A3[USAspending, post archives]
+  end
+  SRC --> B[Recorder: split-safe local store]
+  B --> C[Strategies emit entry, stop, target]
+  C --> D[Backtest engine: next-bar fills and costs]
+  D --> E[Walk-forward test, 2019 to 2024]
+  E --> F{All checks passed?}
+  F -- no --> G[Idea closed, trials counted]
+  F -- yes --> H[One run on holdout, 2025 onward]
+  H --> I[Paper trading]
+  I --> J[Real money only after proof]

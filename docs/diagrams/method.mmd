@@ -1,0 +1,10 @@
+flowchart TD
+  I[New idea] --> P[Pre-register: protocol, grid, pass criteria]
+  P --> R[Run once: walk-forward 2019 to 2024, minus the market, every trial counted]
+  R --> Q{All checks pass?}
+  Q -- no --> X[Close the idea, publish the result]
+  Q -- yes --> U[Repeat on unseen stocks]
+  U --> V{Still passes?}
+  V -- no --> X
+  V -- yes --> H[One run on the holdout, 2025 onward]
+  H --> T[Paper trade, then real money]
