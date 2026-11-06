@@ -5,6 +5,10 @@
 Data -> signals -> backtest -> paper trading for short-term US stock strategies. Starts at $0: research and
 paper trading only. Created in [T3 Code](https://t3.codes).
 
+## Findings
+
+**Twelve pre-registered strategy tests on free data, none eligible.** Read the write-up: [docs/findings.md](docs/findings.md).
+
 ## Status
 
 | Milestone | State |
@@ -19,6 +23,10 @@ paper trading only. Created in [T3 Code](https://t3.codes).
 | M7 earnings-announcement drift (150 stocks, SEC filing times) | done: passes 5 of 6, fails Deflated Sharpe, not eligible; about half the raw gain is market drift, see [docs/m7-results.md](docs/m7-results.md) |
 | M8 confirm the earnings-drift setting on 250 unseen stocks | done: did not replicate (+0.025R +-0.077), the lead is closed, see [docs/m8-results.md](docs/m8-results.md) |
 | M9 original indicator strategies (UT Bot + STC, Supertrend + Waddah) | done: failed, clearly negative (-0.04R +-0.005), see [docs/m9-results.md](docs/m9-results.md) |
+| M10 insider buying (SEC Form 4, routine vs opportunistic) | done: not eligible, raw gain was market beta (-0.079R after the market), see [docs/m10-results.md](docs/m10-results.md) |
+| M11 volume-dry-up reversal, high-volume continuation | done: not eligible, see [docs/m11-volume-results.md](docs/m11-volume-results.md) |
+| M12 presidential posts and Pentagon awards (event studies) | done: no effect after the first open, see [docs/m12-political-results.md](docs/m12-political-results.md) |
+| M13 200-day trend filter on SPY | done: smoother drawdowns, about 4 points a year less return, see [docs/m13-trend-filter-results.md](docs/m13-trend-filter-results.md) |
 | M5 paper loop on Alpaca | plumbing done and tested, not scheduled; nothing to run for evidence until a strategy passes |
 
 ## Setup
@@ -54,11 +62,16 @@ df = load_bars("NVDA", feed="sip", timeframe="1Min", rth=True, resample="5min") 
 
 Coarser bars are derived from 1-minute bars (`resample="5min"`), not stored separately.
 
-### Daily schedule (installed)
+### Daily schedule (parked)
 
 `ops/launchd/com.tradingpipeline.recorder.plist` runs the recorder daily at 03:00 local time (CET, which is
 21:00 ET, after the extended session and the SIP delay). If the Mac was asleep, launchd runs it on wake, and
 the recorder catches up on anything missed. Log: `data/logs/recorder.log`.
+
+**Currently parked** (unloaded; the installed copy is saved in `data/parked/`). To restart it, copy the plist from
+`ops/launchd/` into `~/Library/LaunchAgents/` and run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradingpipeline.recorder.plist`.
+A 403 problem that made every nightly request fail (the fetch end time reached past the free tier's 15-minute
+delay when the job ran after 20:30 ET) is fixed in `tp.recorder.fetch_end`.
 
 ```sh
 launchctl print gui/$(id -u)/com.tradingpipeline.recorder      # status
@@ -88,7 +101,7 @@ Overfitting guards:
 - **Trial registry.** Every run is appended to `data/trials.sqlite`. The count per strategy feeds the Deflated Sharpe check.
 - **Holdout.** Data from `config.HOLDOUT_START` (2025-01-01) is refused unless `--use-holdout` is passed, and such runs are flagged. Keep it for the final validation only.
 
-Verification: 61 tests, plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
+Verification: the test suite (204 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
 
 ### Baseline result (plumbing check, not a finding)
 
