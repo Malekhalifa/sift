@@ -22,27 +22,8 @@ rise was subtracted or until the idea was repeated on stocks it had never seen. 
 promoted to paper trading for evidence. The useful output is not a strategy; it is a method, and a short list of ways
 that backtests flatter themselves.
 
-![Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals](img/forest.svg)
-
-*Figure 1. Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge.
-Blue: as tested. Orange: after subtracting what simply holding the market earned over the same dates, a check added
-from M7 on. Lines are 95% confidence intervals.*
-
-## Summary
-
-- **No idea passed.** Of twelve, the closest were earnings drift (5 of 6 checks, then it failed to replicate on 250
-  unseen stocks) and a volume-spike rule (5 of 7 checks, then it turned negative after subtracting the market).
-- **When it looked like an edge, it was mostly the market.** Long-only rules were positive in 2019 to 2024 largely
-  because stocks rose. Insider buying went from +0.028R to -0.079R, and volume spikes from +0.100R to -0.039R, once the
-  market was subtracted.
-- **Costs were not the main reason.** The price-pattern families had no edge even at zero cost (for example breakouts at
-  -0.020R, volume reversal at +0.006R, both consistent with zero).
-- **Replication was the strongest filter.** A faint breakout result on 10 stocks (+0.065R) became -0.046R on 50 fresh
-  ones. Earnings drift (+0.156R) became +0.025R on 250 unseen stocks.
-- **Precision was high, so the negatives are real.** Some tests had around 100,000 trades with intervals of about
-  +-0.005R. These are measured zeros and small negatives, not "not enough data".
-- **A side question gave a trade-off, not a free lunch.** A 200-day trend filter on SPY cut the worst drawdown from -32% to
-  -22% but cost about 4 points a year of return.
+> **The result in one line:** twelve ideas tested, none passed. When something looked like an edge, it was
+> usually the market rising or luck that did not repeat on new stocks. No money was traded.
 
 ## 1. About the project: why and how
 
@@ -96,7 +77,7 @@ flowchart TD
 ```
 <!-- /diagram -->
 
-*Figure 2. The pipeline. Data flows from free sources through a split-safe store into strategies and a cost-aware backtest; only an idea that passes every check reaches the holdout, and only after that paper trading.*
+*Figure 1. The pipeline. Data flows from free sources through a split-safe store into strategies and a cost-aware backtest; only an idea that passes every check reaches the holdout, and only after that paper trading.*
 
 The work was organised as one **milestone per idea**. For each, a protocol (the exact rules, the parameter grid and the pass
 criteria) was written and committed to version control first; the test was then run once, and the result was recorded
@@ -175,7 +156,7 @@ safer.
 
 ## 3. How the tests were kept honest
 
-Most backtests that look good are noise that was selected. The framework was built to make that hard: Figure 3 shows the
+Most backtests that look good are noise that was selected. The framework was built to make that hard: Figure 2 shows the
 method applied to every idea, and the table lists its safeguards.
 
 | Safeguard | What it does |
@@ -210,9 +191,12 @@ flowchart TD
 ```
 <!-- /diagram -->
 
-*Figure 3. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.*
+*Figure 2. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.*
 
 ## 4. Results
+
+The table gives each idea's out-of-sample result and how many of its pre-registered checks it passed; Figure 3 shows the
+same results as a picture, with their 95% intervals.
 
 | Milestone | Idea | Data | Out-of-sample result (95% interval) | Checks passed |
 |--------|-------------------------|--------------------|--------------------|--------|
@@ -230,6 +214,12 @@ flowchart TD
 | M11 | High-volume continuation | 409 stocks, daily | +0.100R +-0.019 | 5 of 7 |
 | M12 | Presidential posts naming a listed company | 133 events | -0.05% +-0.60 per event | 1 of 4 |
 | M12 | Large Pentagon awards to listed primes | 933 events | -0.10% +-0.27 per event | 1 of 4 |
+
+![Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals](img/forest.svg)
+
+*Figure 3. Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge.
+Blue: as tested. Orange: after subtracting what simply holding the market earned over the same dates, a check added
+from M7 on. Lines are 95% confidence intervals.*
 
 M12 is an event study (average market-adjusted return over five sessions, net of 10 basis points), not a strategy sweep,
 so it has its own four criteria. "M4" and "M4b" are the ten-stock and fifty-stock runs of the same breakout grid.
@@ -323,7 +313,23 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
   approximately. A paper-trading loop was built and tested against a broker's paper account for plumbing only; nothing was
   run for evidence.
 
-## 8. Takeaways
+## 8. Summary of findings
+
+- **No idea passed.** Of twelve, the closest were earnings drift (5 of 6 checks, then it failed to replicate on 250
+  unseen stocks) and a volume-spike rule (5 of 7 checks, then it turned negative after subtracting the market).
+- **When it looked like an edge, it was mostly the market.** Long-only rules were positive in 2019 to 2024 largely
+  because stocks rose. Insider buying went from +0.028R to -0.079R, and volume spikes from +0.100R to -0.039R, once the
+  market was subtracted.
+- **Costs were not the main reason.** The price-pattern families had no edge even at zero cost (for example breakouts at
+  -0.020R, volume reversal at +0.006R, both consistent with zero).
+- **Replication was the strongest filter.** A faint breakout result on 10 stocks (+0.065R) became -0.046R on 50 fresh
+  ones. Earnings drift (+0.156R) became +0.025R on 250 unseen stocks.
+- **Precision was high, so the negatives are real.** Some tests had around 100,000 trades with intervals of about
+  +-0.005R. These are measured zeros and small negatives, not "not enough data".
+- **A side question gave a trade-off, not a free lunch.** A 200-day trend filter on SPY cut the worst drawdown from -32% to
+  -22% but cost about 4 points a year of return.
+
+## 9. Takeaways
 
 1. **Write the rules down before you look.** Commit them. It removes the most common way to fool yourself.
 2. **Count your tries.** The best of many looks good by luck; deflate for it.
@@ -334,7 +340,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
    rarely come with losing runs or costs. They deserve the same test as anything else, and most will fail it.
 7. **A clear "no" is a result.** It saved capital, and the method now makes the next question cheap to test.
 
-## 9. Reproduce it
+## 10. Reproduce it
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
 (212 passing). Data is not redistributed; the scripts fetch it from the free sources above.
@@ -349,7 +355,7 @@ The last command reruns one pre-registered sweep (insider buying).
 
 Start with `README.md`, then `docs/m4-protocol.md` for the method and `docs/m*-results.md` for each result.
 
-## 10. Disclosures
+## 11. Disclosures
 
 This is a personal research project. It is not investment advice and recommends no security or strategy. No real money was
 traded. The code, analysis and drafting were done with an AI coding assistant (Claude Code); every number in this report is
@@ -363,6 +369,5 @@ taken from results recorded in the repository, and the protocols' commit order i
 - Ajjoub, C., Walker, T. and Zhao, Y., Social media posts and stock returns: The Trump factor, International Journal of
   Managerial Finance, [record](https://econpapers.repec.org/RePEc:eme:ijmfpp:ijmf-02-2020-0068).
 - Martineau, C. (2022), Rest in Peace Post-Earnings Announcement Drift, Critical Finance Review 11(3-4),
-  [record](https://econpapers.repec.org/RePEc:now:jnlcfr:104.00000122): argues the drift has largely disappeared outside
-  the smallest stocks, which is why earnings drift had a low prior here. Later work disputes this, depending on whether
-  micro-caps are included.
+  [record](https://econpapers.repec.org/RePEc:now:jnlcfr:104.00000122): the drift has faded outside the smallest stocks
+  (later work disputes this).

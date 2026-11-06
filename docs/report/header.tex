@@ -1,24 +1,55 @@
+% Sift report template: serif body, sans headings, navy accent, orange highlight.
 \usepackage{xcolor}
 \definecolor{accent}{HTML}{1F4E79}
+\definecolor{accentdeep}{HTML}{13304F}
+\definecolor{highlight}{HTML}{E07B24}
 \definecolor{ink}{HTML}{1D2733}
-\definecolor{muted}{HTML}{5B6672}
+\definecolor{muted}{HTML}{66717D}
+\definecolor{rowshade}{HTML}{F1F4F8}
 \usepackage{etoolbox}
 \usepackage{needspace}
+\usepackage{tikz}
+\usepackage[most]{tcolorbox}
+\setsansfont{Avenir Next}
+\color{ink}
+
+% headings: sans, accent, a thin rule under each section
 \usepackage{titlesec}
-\titleformat{\section}{\Large\bfseries\color{accent}}{}{0pt}{}
-\titleformat{\subsection}{\large\bfseries\color{ink}}{}{0pt}{}
-\titlespacing*{\section}{0pt}{2.2ex plus 1ex minus .2ex}{1.2ex}
+\titleformat{\section}{\sffamily\LARGE\bfseries\color{accent}}{}{0pt}{}[\vspace{3pt}{\color{accent!25}\titlerule[0.8pt]}]
+\titleformat{\subsection}{\sffamily\large\bfseries\color{ink}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{3.2ex plus 1ex minus .2ex}{1.6ex}
+\titlespacing*{\subsection}{0pt}{2.4ex plus .8ex minus .2ex}{0.9ex}
+
+% contents on its own page, in sans
+\usepackage{tocloft}
+\renewcommand{\cfttoctitlefont}{\sffamily\LARGE\bfseries\color{accent}}
+\renewcommand{\cftsecfont}{\sffamily\bfseries}
+\renewcommand{\cftsecpagefont}{\sffamily\bfseries}
+\renewcommand{\cftsubsecfont}{\sffamily}
+\renewcommand{\cftsubsecpagefont}{\sffamily}
+\setlength{\cftbeforesecskip}{5pt}
+\AtBeginDocument{\let\siftoldtoc\tableofcontents\renewcommand{\tableofcontents}{\siftoldtoc\clearpage}}
+
+% footer only: report name left, page number right
 \usepackage{fancyhdr}
 \pagestyle{fancy}
 \fancyhf{}
-\renewcommand{\headrulewidth}{0.4pt}
-\renewcommand{\headrule}{\hbox to\headwidth{\color{accent}\leaders\hrule height \headrulewidth\hfill}}
-\fancyhead[L]{\small\color{muted}Sift: twelve trading ideas, tested honestly on free data}
-\fancyfoot[C]{\small\color{muted}\thepage}
-\AtBeginEnvironment{longtable}{\footnotesize\setlength{\tabcolsep}{4pt}}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{\sffamily\scriptsize\color{muted}\textbf{Sift}\quad Twelve trading ideas, tested honestly on free data}
+\fancyfoot[R]{\sffamily\scriptsize\color{accent}\textbf{\thepage}}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[R]{\sffamily\scriptsize\color{accent}\textbf{\thepage}}}
+
+% block quotes become callout boxes
+\renewenvironment{quote}{\begin{tcolorbox}[enhanced,breakable,colback=accent!6,colframe=accent,boxrule=0pt,leftrule=3.5pt,arc=0pt,outer arc=0pt,left=11pt,right=11pt,top=7pt,bottom=7pt,before skip=10pt,after skip=12pt,fontupper=\sffamily\small\color{ink}]}{\end{tcolorbox}}
+
+% tables: sans, small, striped rows
+\AtBeginEnvironment{longtable}{\sffamily\footnotesize\setlength{\tabcolsep}{5pt}\renewcommand{\arraystretch}{1.25}\rowcolors{2}{rowshade}{white}}
 \setlength{\emergencystretch}{3em}
+
+% figures stay where they are written; captions small sans
 \usepackage{float}
 \floatplacement{figure}{H}
 \usepackage{caption}
-\captionsetup{font={small,it},labelformat=empty,justification=raggedright,singlelinecheck=false,skip=6pt}
+\captionsetup{font={small,sf},labelformat=empty,justification=raggedright,singlelinecheck=false,skip=8pt,textfont={color=muted}}
 \setkeys{Gin}{keepaspectratio}
+\setlength{\parskip}{0.45em}

@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 from tp import config
 
-DEFAULT_USER_AGENT = "trading-pipeline-research (github.com/Malekhalifa/trading-pipeline)"
+DEFAULT_USER_AGENT = "sift-research (github.com/Malekhalifa/sift)"
 
 
 def user_agent() -> str:

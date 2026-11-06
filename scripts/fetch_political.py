@@ -29,7 +29,7 @@ from tp import config, political
 TWEETS = "https://raw.githubusercontent.com/bpb27/trump_tweet_data_archive/master/condensed_{year}.json.zip"
 TRUTH = "https://ix.cnn.io/data/truth-social/truth_archive.parquet"
 USASPENDING = "https://api.usaspending.gov/api/v2/search/spending_by_transaction/"
-UA = {"User-Agent": "trading-pipeline-research"}
+UA = {"User-Agent": "sift-research"}
 TAG = re.compile(r"<[^>]+>")
 
 

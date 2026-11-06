@@ -18,6 +18,7 @@ import hashlib
 import os
 import re
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -91,6 +92,17 @@ def keep_together(text: str) -> str:
             lines += max([-(-len(c) // max(6, int(105 * d / total))) for c, d in zip(cells, dashes)] + [1])
         return min(int(lines * 1.3) + 5, 46)
 
+    def figure_lines(block: str) -> int:
+        """Height of an image paragraph in lines, from the PNG's aspect ratio and its share of the 15.8 cm text width."""
+        m = re.match(r"!\[[^\]]*\]\(([^)\s]+)\)(?:\{width=(\d+)%\})?", block)
+        if not m or not Path(m.group(1)).exists():
+            return 9
+        with open(m.group(1), "rb") as f:
+            f.read(16)
+            w, h = struct.unpack(">II", f.read(8))
+        height_cm = 15.8 * int(m.group(2) or 100) / 100 * h / w
+        return int(height_cm / 0.51) + 4
+
     blocks = text.split("\n\n")
     out, in_code = [], False
     for i, block in enumerate(blocks):
@@ -101,7 +113,14 @@ def keep_together(text: str) -> str:
                 if not (i and blocks[i - 1].lstrip().startswith(("## ", "### "))):  # else the heading already asked for the room
                     out.append(f"\\Needspace{{{table_lines(block)}\\baselineskip}}")
             elif first.startswith(("## ", "### ")):
-                need = table_lines(following) + 3 if following.startswith("|") else 9
+                if following.startswith("|"):
+                    need = table_lines(following) + 3
+                elif following.startswith("!["):
+                    need = min(figure_lines(following) + 3, 46)
+                elif i + 2 < len(blocks) and blocks[i + 2].startswith("|") and len(following) < 400:
+                    need = min(table_lines(blocks[i + 2]) + 3 + len(following) // 80 + 1, 46)  # heading, short intro, table
+                else:
+                    need = 9
                 out.append(f"\\Needspace{{{need}\\baselineskip}}")
         if block.count("```") % 2 == 1:
             in_code = not in_code
@@ -165,10 +184,11 @@ def build_pdf(markdown: Path, out_pdf: Path, renderer: Path = DEFAULT_RENDERER) 
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["pandoc", str(body), "-f", "markdown+pipe_tables+implicit_figures", "-o", str(out_pdf), "--pdf-engine=xelatex",
-         "--toc", "--toc-depth=2", "--highlight-style=tango", f"--include-in-header={REPORT_DIR / 'header.tex'}",
+         "--toc", "--toc-depth=1", "--shift-heading-level-by=-1", "--highlight-style=tango", f"--include-in-header={REPORT_DIR / 'header.tex'}",
          f"--include-before-body={cover}", "--resource-path", str(work),
-         "-V", "documentclass=article", "-V", "geometry:margin=2.3cm", "-V", "fontsize=10.5pt", "-V", "linestretch=1.12",
-         "-V", "mainfont=Avenir Next", "-V", "monofont=Menlo", "-V", "colorlinks=true", "-V", "linkcolor=accent",
+         "-V", "documentclass=article", "-V", "classoption=table", "-V", "papersize=a4",
+         "-V", "geometry:top=2.3cm,bottom=2.7cm,left=2.6cm,right=2.6cm", "-V", "fontsize=11pt", "-V", "linestretch=1.1",
+         "-V", "mainfont=Charter", "-V", "monofont=Menlo", "-V", "colorlinks=true", "-V", "linkcolor=accent",
          "-V", "urlcolor=accent", "-V", "toccolor=ink", "-V", "title-meta=Twelve trading ideas, tested honestly on free data",
          "-V", "subject=Pre-registered negative-results report on short-term US stock strategies"],
         check=True, capture_output=True, text=True,
