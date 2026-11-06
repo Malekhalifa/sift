@@ -1,0 +1,22 @@
+# M10 pre-registered sweep: insider buying (Form 4), routine vs opportunistic, long only, daily bars.
+# Frozen when committed. Changing any value means a new name; trials already logged keep counting.
+name = "m10-insider-v1"
+engine = "swing"
+universe = "insider"               # traded + wide + events + confirm pooled, one symbol per SEC company ID
+bar_timeframe = "1Day"             # SIP daily bars, split-adjusted
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 100
+slippage = 0.02                    # $ per share, as-traded, each market fill (mid-cap level, as M8)
+stress_slippage = 0.04             # the 2x cost check
+max_positions = 10                 # portfolio view only; the pass criteria use every simulated trade
+regime_check = false
+drop_incomplete = true             # symbols whose daily history does not cover the whole period are dropped
+market_adjusted_check = true
+
+[insider.grid]                     # 2 x 2 x 2 x 2 = 16 configurations
+classes = ["opportunistic", "opportunistic+thin"]
+min_insiders = [1, 2]
+min_value = [100000.0, 500000.0]
+max_hold = [20, 60]
