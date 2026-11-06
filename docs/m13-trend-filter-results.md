@@ -28,8 +28,9 @@ holdout was not read. No trials were added to the registry (298).
   about equal (Sharpe 0.75 against 0.78).
 - **It whipsawed.** 26 round trips, 18 of them lost money. The wins were few and large (the two crashes); the cost was
   many small losses and late re-entries.
-- **The gap is real, not an artefact of the assumptions.** Zero interest on cash and no dividends on the out-of-market days
-  shave the rule by well under one point a year; the shortfall is four.
+- **The gap is not an artefact of the assumptions.** Zero interest on cash and no dividends on the out-of-market days
+  would cost the rule roughly one point a year at most (a back-of-envelope figure: 19% of days out of the market times a
+  yield of 2% to 3.5%, not a measured run); the shortfall is four.
 - **QQQ, informational and not judged:** drawdown -23% vs -37%, CAGR 18.8% vs 20.2% (1.4 below), Sharpe 1.08 vs 0.94. That
   looks better, but it is a second asset looked at after seeing SPY, on a tech-heavy index that fell hard in 2022 and
   recovered. Picking it now would be choosing the better of two outcomes after the fact, so it is not a finding.
@@ -40,6 +41,6 @@ holdout was not read. No trials were added to the registry (298).
 
 This does not touch the trading result: there is still no edge for a short-term trader. For a long-term holder the choice
 is a trade-off, not a free lunch. A filter like this buys shallower drawdowns by giving up return, and the evidence in our
-data says the price was too high for SPY. Simple regular purchases of a broad index, held through the falls, matched or
-beat the filtered version here. That is a statement about eight past years, not a prediction and not financial advice;
+data says the price was too high for SPY. Holding the index through the falls beat the filtered version on total return here
+(regular purchases over time were not tested). That is a statement about eight past years, not a prediction and not financial advice;
 how much of a drop you could sit through matters more than any of these numbers.
