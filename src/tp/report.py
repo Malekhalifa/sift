@@ -26,7 +26,7 @@ DIAGRAMS = ROOT / "docs" / "diagrams"
 REPORT_DIR = ROOT / "docs" / "report"
 DEFAULT_RENDERER = Path(os.environ.get("PRETTY_MERMAID_DIR", Path.home() / ".claude" / "skills" / "pretty-mermaid"))
 THEME = "nord-light"
-FIGURE_WIDTHS = {"pipeline": "86%", "method": "80%", "verdicts": "100%"}  # share of the text width; anything else is full width
+FIGURE_WIDTHS = {"pipeline": "78%", "method": "70%", "verdicts": "100%"}  # share of the text width; anything else is full width
 
 MARKED = re.compile(r"(<!-- diagram:(?P<name>[\w-]+) -->\n)```mermaid\n.*?\n```\n(<!-- /diagram -->)", re.S)
 FENCE = re.compile(r"```mermaid\n(?P<code>.*?)\n```\n", re.S)
@@ -74,6 +74,41 @@ def name_of(code: str) -> str | None:
     return None
 
 
+def keep_together(text: str) -> str:
+    """Raw LaTeX before every heading and table: if too little room is left on the page, start a new one, so a table or a
+    section never begins at the foot of a page and leaves its content on the next. A heading that is followed directly by a
+    table asks for the room of the whole table, so the two stay together."""
+    def table_lines(block: str) -> int:
+        """Rendered height in lines: each row is as tall as its most wrapped cell. Columns share the width in proportion to the
+        dashes of the separator row (as pandoc sets them), about 105 characters per full-width line at table size."""
+        rows = [r for r in block.split("\n") if r.strip()]
+        if len(rows) < 3:
+            return 8
+        dashes = [max(len(c.strip()), 1) for c in rows[1].strip().strip("|").split("|")]
+        total, lines = sum(dashes), 0
+        for row in [rows[0], *rows[2:]]:
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            lines += max([-(-len(c) // max(6, int(105 * d / total))) for c, d in zip(cells, dashes)] + [1])
+        return min(int(lines * 1.3) + 5, 46)
+
+    blocks = text.split("\n\n")
+    out, in_code = [], False
+    for i, block in enumerate(blocks):
+        if not in_code:
+            first = block.lstrip().split("\n", 1)[0]
+            following = blocks[i + 1] if i + 1 < len(blocks) else ""
+            if block.startswith("|"):
+                if not (i and blocks[i - 1].lstrip().startswith(("## ", "### "))):  # else the heading already asked for the room
+                    out.append(f"\\Needspace{{{table_lines(block)}\\baselineskip}}")
+            elif first.startswith(("## ", "### ")):
+                need = table_lines(following) + 3 if following.startswith("|") else 9
+                out.append(f"\\Needspace{{{need}\\baselineskip}}")
+        if block.count("```") % 2 == 1:
+            in_code = not in_code
+        out.append(block)
+    return "\n\n".join(out)
+
+
 def pdf_markdown(text: str, source_dir: Path, work: Path, renderer: Path = DEFAULT_RENDERER) -> str:
     """Markdown ready for pandoc: mermaid blocks and SVGs become PNG figures (with their captions); the title block above
     the Abstract is dropped (the cover page carries it)."""
@@ -106,7 +141,7 @@ def pdf_markdown(text: str, source_dir: Path, work: Path, renderer: Path = DEFAU
 
     text = CAPTIONED.sub(caption, text)
     head = text.find("## Abstract")
-    text = text[head:] if head != -1 else text
+    text = keep_together(text[head:] if head != -1 else text)
     # typography: +-0.1 becomes a plus-minus sign, and a leading hyphen before a digit becomes a true minus sign
     text = re.sub(r"\+-(?=\s?\d)", "\u00b1", text)
     return re.sub(r"(?<![\w\-/.])-(?=\d)", "\u2212", text)
@@ -123,8 +158,10 @@ def build_pdf(markdown: Path, out_pdf: Path, renderer: Path = DEFAULT_RENDERER) 
     body = work / "report.md"
     work.mkdir(parents=True)
     body.write_text(pdf_markdown(sync_diagrams(raw), markdown.parent, work, renderer))
+    icon = work / "icon.png"
+    svg_to_png(ROOT / "assets" / "icon.svg", icon, 512)
     cover = work / "cover.tex"
-    cover.write_text((REPORT_DIR / "cover.tex").read_text().replace("@DATE@", date))
+    cover.write_text((REPORT_DIR / "cover.tex").read_text().replace("@DATE@", date).replace("@ICON@", str(icon)))
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["pandoc", str(body), "-f", "markdown+pipe_tables+implicit_figures", "-o", str(out_pdf), "--pdf-engine=xelatex",

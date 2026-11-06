@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="assets/icon.svg" width="72" height="72" alt="">
+<img src="assets/icon.svg" width="96" height="96" alt="Sift logo: a sieve catching trading ideas">
 
-# Trading-Pipeline
+# Sift
 
-### Twelve trading ideas, tested honestly on free data
+### Honest testing for trading ideas
 
-A pre-registered research pipeline for short-term US stock strategies.<br>
-Built to find an edge, and to catch the ideas that only look like one.
+A pre-registered research pipeline that tests short-term US stock strategies on free data,<br>
+and catches the ideas that only look like they work.
 
-![tests](https://img.shields.io/badge/tests-209%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-210%20passing-2ea44f)
 ![python](https://img.shields.io/badge/python-3.12%2B-3776ab)
 ![status](https://img.shields.io/badge/status-research%20complete-1f4e79)
 ![holdout](https://img.shields.io/badge/2025%2B%20holdout-untouched-d95f02)
@@ -21,10 +21,20 @@ Built to find an edge, and to catch the ideas that only look like one.
 
 ---
 
-## The result in one line
+## What is Sift?
 
-> **None of twelve ideas passed its pre-registered checks.** Several looked like winners until the market's own rise
-> was subtracted, or until the idea was repeated on stocks it had never seen. No money was traded.
+**Why.** Trading strategies spread online because they are easy to describe and easy to believe: a bot that doubled a small
+account overnight, two indicators with a high win rate, a screenshot of a good week. What is missing is a fair test. Two
+traps make almost any idea look good: **selection luck** (try enough rules on one stretch of history and some will fit it by
+chance) and **the market's own rise** (when stocks go up, almost any rule that buys makes money). Sift exists to find out
+which ideas, if any, survive a test that is built to catch both, starting from $0 and using only free data.
+
+**What.** Sift downloads market data, turns each idea into exact rules, simulates the trades with realistic costs, and judges
+the result with checks designed to catch luck. The rule is simple: **no real money until an idea has proved itself on data it
+was not tuned on.** The name is the method: put each idea on a sieve and see what stays behind.
+
+**Result.** Twelve ideas were tested. None passed. Several looked like winners until the market's rise was subtracted, or until
+they were repeated on stocks they had never seen. No money was traded.
 
 <p align="center">
   <img src="docs/img/forest.svg" alt="Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals" width="900">
@@ -32,29 +42,28 @@ Built to find an edge, and to catch the ideas that only look like one.
 
 <sub>Dot = result after costs, line = 95% confidence interval, zero = no edge. Orange = after subtracting what simply holding the market earned. R = profit in units of the amount risked per trade.</sub>
 
-## Scoreboard
+## The twelve ideas and what happened
 
-| | Idea | Out-of-sample result | Verdict |
-|:-:|---|---|---|
-| ⚠️ | Opening-range breakout | +0.065R ±0.114 on 10 stocks | Faint tilt that vanished on 50 fresh stocks (−0.046R) |
-| ❌ | Failed-breakout fade | −0.000R ±0.042 | No edge |
-| ❌ | RSI(2) mean reversion | −0.026R ±0.021 | Significantly negative |
-| ❌ | 20/200-day pullback | −0.032R ±0.028 | Significantly negative |
-| ⚠️ | Earnings drift (SEC filing times) | +0.156R ±0.099 | 5 of 6 checks, then **+0.025R** on 250 unseen stocks |
-| ❌ | UT Bot + Schaff Trend Cycle | −0.038R ±0.006 | Clearly negative |
-| ❌ | Supertrend + Waddah Attar | −0.042R ±0.005 | Clearly negative |
-| ⚠️ | Insider buying (Form 4) | +0.028R ±0.078 | The gain was the market: **−0.079R** after subtracting it |
-| ❌ | Volume-dry-up reversal | −0.008R ±0.010 | No edge, even before costs |
-| ⚠️ | High-volume continuation | +0.100R ±0.019 | 5 of 7 checks, then **−0.039R** after the market |
-| ❌ | Presidential posts naming a company | −0.05% ±0.60 per event | Nothing left after the first open |
-| ❌ | Large Pentagon contract awards | −0.10% ±0.27 per event | Nothing left after the first open |
-| ⚖️ | 200-day trend filter on SPY (not a trading edge) | 8.8% a year vs 12.8% | Worst drop −22% instead of −32%, at a price |
+Each idea is a belief about how prices behave. The test asks: acting on that belief with fixed rules, would it have made money
+after costs, and more than just holding the market?
 
-## Why this exists
+| # | Idea | The belief, in plain words | Result | Verdict |
+|:-:|---|---|---|---|
+| 1 | Opening-range breakout | After the first minutes set a range, a close beyond it keeps going | +0.065R ±0.114 | ⚠️ Faint tilt that vanished on 50 fresh stocks (−0.046R) |
+| 2 | Failed-breakout fade | A breakout that fails traps buyers and reverses | −0.000R ±0.042 | ❌ No edge |
+| 3 | RSI(2) mean reversion | After a sharp two-day fall, a stock bounces within days | −0.026R ±0.021 | ❌ Significantly negative |
+| 4 | 20/200-day pullback | In an uptrend, a dip to the 20-day average is a cheap entry | −0.032R ±0.028 | ❌ Significantly negative |
+| 5 | Earnings drift | After an unusual earnings reaction, a stock keeps moving that way | +0.156R ±0.099 | ⚠️ 5 of 6 checks, then **+0.025R** on 250 unseen stocks |
+| 6 | Insider buying | Executives buying with their own money know something | +0.028R ±0.078 | ⚠️ The gain was the market: **−0.079R** after subtracting it |
+| 7 | Presidential posts | A post praising or attacking a company moves its stock | −0.05% ±0.60 per event | ❌ Nothing left after the first open |
+| 8 | Pentagon contract awards | A big defence contract lifts the winner's stock | −0.10% ±0.27 per event | ❌ Nothing left after the first open |
+| 9 | UT Bot + Schaff Trend Cycle | A video "bot": a trailing-stop flip confirmed by a cycle indicator | −0.038R ±0.006 | ❌ Clearly negative |
+| 10 | Supertrend + Waddah Attar | A video "bot": a trend line agreeing with a momentum surge | −0.042R ±0.005 | ❌ Clearly negative |
+| 11 | Volume-dry-up reversal | A weekly move on shrinking volume snaps back | −0.008R ±0.010 | ❌ No edge, even before costs |
+| 12 | High-volume continuation | The highest volume in weeks starts an upward drift | +0.100R ±0.019 | ⚠️ 5 of 7 checks, then **−0.039R** after the market |
+| – | 200-day trend filter on SPY | Holding the market only above its 200-day average is safer | 8.8% a year vs 12.8% | ⚖️ Worst drop −22% instead of −32%, at a price |
 
-I wanted a pipeline that gathers data from trusted free sources, applies strategies, backtests and optimises them, and only
-then paper trades, with real money considered only after a proven edge. Starting capital: $0. Most backtests that look good
-are noise that was selected, so the **testing framework** matters more than any one strategy. That is what this repo is.
+The last row is a side question, not a trading idea. Full plain-language explanations are in the [report](docs/findings.md#2-the-twelve-ideas-in-plain-words).
 
 ## How it works
 
@@ -64,19 +73,25 @@ flowchart TD
   subgraph SRC[Free data sources]
     A1[Alpaca bars, 2016 onward]
     A2[SEC EDGAR filings]
-    A3[USAspending, post archives]
+    A3[Contract records, post archives]
   end
   SRC --> B[Recorder: split-safe local store]
   B --> C[Strategies emit entry, stop, target]
-  C --> D[Backtest engine: next-bar fills and costs]
-  D --> E[Walk-forward test, 2019 to 2024]
-  E --> F{All checks passed?}
+  C --> D[Backtest with realistic costs, then walk-forward test]
+  D --> F{All checks passed?}
   F -- no --> G[Idea closed, trials counted]
-  F -- yes --> H[One run on holdout, 2025 onward]
-  H --> I[Paper trading]
-  I --> J[Real money only after proof]
+  F -- yes --> H[One run on holdout, then paper trading]
 ```
 <!-- /diagram -->
+
+1. **Data.** A recorder downloads free bars (Alpaca's free tier, back to 2016), SEC filings, government contract records and
+   public post archives into a local store. Stock splits are applied when data is read.
+2. **Strategies.** Each idea becomes exact rules that output signals: direction, entry, stop and a target at 1.5 times the risk.
+3. **Backtest engine.** It replays history with realistic fills (next-bar open plus slippage, stops win ties, gaps fill at the open)
+   and measures results in R, profit as a multiple of the amount risked.
+4. **Statistics.** Walk-forward testing, a log of every configuration tried, a Deflated Sharpe check, a market-adjusted check and
+   replication on unseen stocks.
+5. **Paper trading.** A loop for a broker's paper account, built for the day an idea passes. None did.
 
 **Tech stack:** Python 3.12+ with `uv`, pandas and Parquet for a split-safe bar store, Alpaca's free market-data tier, SEC EDGAR,
 USAspending.gov, a SQLite trial registry, pytest, and Mermaid with pandoc/XeLaTeX for the report.
@@ -87,14 +102,13 @@ USAspending.gov, a SQLite trial registry, pytest, and Mermaid with pandoc/XeLaTe
 ```mermaid
 flowchart TD
   I[New idea] --> P[Pre-register: protocol, grid, pass criteria]
-  P --> R[Run once: walk-forward 2019 to 2024, minus the market, every trial counted]
+  P --> R[Run once: walk-forward 2019 to 2024, minus the market]
   R --> Q{All checks pass?}
   Q -- no --> X[Close the idea, publish the result]
   Q -- yes --> U[Repeat on unseen stocks]
   U --> V{Still passes?}
   V -- no --> X
-  V -- yes --> H[One run on the holdout, 2025 onward]
-  H --> T[Paper trade, then real money]
+  V -- yes --> H[One run on the holdout, then paper trade]
 ```
 <!-- /diagram -->
 
@@ -159,7 +173,7 @@ M0 to M3 and M5 are infrastructure: decisions, a data-depth probe, the recorder,
 ```sh
 uv sync
 cp .env.example .env        # fill in the Alpaca paper keys; .env is gitignored
-uv run pytest               # 209 tests
+uv run pytest               # 210 tests
 uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml   # rerun one pre-registered sweep
 uv run python scripts/build_report.py                                    # rebuild the PDF (needs pandoc + XeLaTeX)
 ```
@@ -263,7 +277,7 @@ Overfitting guards:
 - **Trial registry.** Every run is appended to `data/trials.sqlite`. The count per strategy feeds the Deflated Sharpe check.
 - **Holdout.** Data from `config.HOLDOUT_START` (2025-01-01) is refused unless `--use-holdout` is passed, and such runs are flagged. Keep it for the final validation only.
 
-Verification: the test suite (209 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
+Verification: the test suite (210 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
 
 #### Baseline result (plumbing check, not a finding)
 

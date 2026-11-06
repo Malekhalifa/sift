@@ -1,19 +1,21 @@
-# Twelve trading ideas, tested honestly on free data
+# Sift: twelve trading ideas, tested honestly on free data
 
 **A pre-registered negative-results report on short-term US stock strategies**
 
 Report date: 6 November 2026. Status: complete for the free-data scope described below. Data after 2024 has never been
-analysed (see the holdout rule in section 2).
+analysed (see the holdout rule in section 3).
 
 A typeset PDF of this report is in [Trading-Research-Findings.pdf](Trading-Research-Findings.pdf).
 
 ## Abstract
 
-I set out to build a pipeline that could find a short-term trading edge in US stocks starting from zero capital, and to
-trust it only if it survived hard tests. Over ten test milestones I tested twelve strategy ideas, from opening-range
-breakouts and RSI reversion to earnings drift, insider buying, volume signals, indicator bots popular in online
-videos, presidential social-media posts and Pentagon contract awards. Every test was written down and committed
-before it was run, scored out of sample, and charged for the number of tries it took to find it.
+Online trading videos and social posts are full of strategies that "work". I wanted to know whether any of them survive a
+fair test, starting from $0 and using only free data, so I built **Sift**: a research pipeline that downloads market data,
+turns each trading idea into precise rules, simulates them with realistic costs, and judges them with checks designed to
+catch luck. Over ten test milestones I tested twelve ideas, from opening-range breakouts and RSI reversion to earnings
+drift, insider buying, volume signals, indicator bots popular in online videos, presidential social-media posts and
+Pentagon contract awards. Every test was written down and committed before it was run, scored out of sample, and
+charged for the number of tries it took to find it.
 
 **None of the twelve ideas met all of its pre-registered criteria.** Several looked promising until the market's own
 rise was subtracted or until the idea was repeated on stocks it had never seen. No money was traded, and no idea was
@@ -42,16 +44,40 @@ from M7 on. Lines are 95% confidence intervals.*
 - **A side question gave a trade-off, not a free lunch.** A 200-day trend filter on SPY cut the worst drawdown from -32% to
   -22% but cost about 4 points a year of return.
 
-## 1. Question and constraints
+## 1. About the project: why and how
 
-The goal: a pipeline that gathers data from trusted free sources, applies rules, backtests and optimises them, and only
-then paper trades, with real money considered only after a proven edge. Constraints fixed at the start:
+### Why it exists
 
-- US stocks, short-term horizons (minutes to a few weeks), a fixed 1:1.5 risk-to-reward bracket on trades.
-- Start with $0 of capital. Free data only: Alpaca's free tier (consolidated-tape bars from 2016, 15 minutes delayed),
-  SEC EDGAR filings, USAspending.gov, public archives of presidential posts.
-- Universe chosen by a fixed rule (median dollar volume in Q1 2016), never by hand: 10 large caps, then 50, 150 and 250
-  further stocks (about 410 in total).
+Strategies spread online because they are easy to describe and easy to believe: a bot that doubled a small account
+overnight, a pair of indicators with a high win rate, a screenshot of a good week. What is missing is a fair test. Two
+traps make almost any idea look good:
+
+- **Selection luck.** Try enough rules on one stretch of history and some will fit it by chance. This is called
+  overfitting, or data-snooping, and the best-looking result of many tries is the one most likely to be luck.
+- **The market's own rise.** In a period when stocks go up, almost any rule that buys will make money. That is not skill.
+
+The goal was therefore twofold: build a pipeline that could find a short-term edge in US stocks, and make it hard for the
+pipeline to fool its builder. The rule was: **no real money until an idea has proved itself on data it was not tuned on.**
+Starting capital is $0, so everything uses free data and paper trading. The name, Sift, is the method: put each idea on a
+sieve and see what stays behind. So far, mostly chaff.
+
+### How it works
+
+Sift has five parts, in the order data moves through them:
+
+1. **Data.** A recorder downloads free market data (Alpaca's free tier gives consolidated-tape bars back to 2016), SEC
+   filings, government contract records and public archives of posts, and stores them locally. Stock splits are applied
+   when data is read, so a new split never corrupts history.
+2. **Strategies.** Each idea is turned into exact rules that output trade signals: a direction, an entry, a stop-loss and a
+   profit target, with the target fixed at 1.5 times the risk.
+3. **Backtest engine.** It replays history trade by trade with realistic conventions: orders fill at the next bar's open plus
+   slippage, a stop wins when a bar touches both stop and target, and gaps fill at the open. Results are measured in R, the
+   profit as a multiple of the amount risked.
+4. **Statistics.** Parameters are chosen on earlier years only and judged on later ones (walk-forward). Every configuration
+   tried is logged, and a Deflated Sharpe check asks whether a result survives that many attempts. The market is subtracted,
+   and promising results must repeat on stocks the rule never saw.
+5. **Paper trading.** A loop that places orders on a broker's paper account was built and tested for plumbing, ready for the day an
+   idea passes. None did, so nothing was ever run for evidence.
 
 <!-- diagram:pipeline -->
 ```mermaid
@@ -59,42 +85,98 @@ flowchart TD
   subgraph SRC[Free data sources]
     A1[Alpaca bars, 2016 onward]
     A2[SEC EDGAR filings]
-    A3[USAspending, post archives]
+    A3[Contract records, post archives]
   end
   SRC --> B[Recorder: split-safe local store]
   B --> C[Strategies emit entry, stop, target]
-  C --> D[Backtest engine: next-bar fills and costs]
-  D --> E[Walk-forward test, 2019 to 2024]
-  E --> F{All checks passed?}
+  C --> D[Backtest with realistic costs, then walk-forward test]
+  D --> F{All checks passed?}
   F -- no --> G[Idea closed, trials counted]
-  F -- yes --> H[One run on holdout, 2025 onward]
-  H --> I[Paper trading]
-  I --> J[Real money only after proof]
+  F -- yes --> H[One run on holdout, then paper trading]
 ```
 <!-- /diagram -->
 
 *Figure 2. The pipeline. Data flows from free sources through a split-safe store into strategies and a cost-aware backtest; only an idea that passes every check reaches the holdout, and only after that paper trading.*
 
-## 2. How the tests were kept honest
+The work was organised as one **milestone per idea**. For each, a protocol (the exact rules, the parameter grid and the pass
+criteria) was written and committed to version control first; the test was then run once, and the result was recorded
+whatever it showed. The commit history therefore proves the order. The code, the analysis and the drafting were done with an
+AI coding assistant; the decisions, and every number in this report, trace back to results recorded in the repository.
 
-Most backtests that look good are noise that was selected. The framework was built to make that hard.
+### Constraints fixed at the start
 
-<!-- diagram:method -->
-```mermaid
-flowchart TD
-  I[New idea] --> P[Pre-register: protocol, grid, pass criteria]
-  P --> R[Run once: walk-forward 2019 to 2024, minus the market, every trial counted]
-  R --> Q{All checks pass?}
-  Q -- no --> X[Close the idea, publish the result]
-  Q -- yes --> U[Repeat on unseen stocks]
-  U --> V{Still passes?}
-  V -- no --> X
-  V -- yes --> H[One run on the holdout, 2025 onward]
-  H --> T[Paper trade, then real money]
-```
-<!-- /diagram -->
+- US stocks, short-term horizons (minutes to a few weeks), a fixed 1:1.5 risk-to-reward bracket on trades.
+- Start with $0 of capital. Free data only: Alpaca's free tier (consolidated-tape bars from 2016, 15 minutes delayed),
+  SEC EDGAR filings, USAspending.gov, public archives of presidential posts.
+- Universe chosen by a fixed rule (median dollar volume in Q1 2016), never by hand: 10 large caps, then 50, 150 and 250
+  further stocks (about 410 in total).
 
-*Figure 3. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.*
+## 2. The twelve ideas, in plain words
+
+Each idea is a belief about how prices behave. A test asks one question: if I had acted on that belief with fixed rules, would
+I have made money after costs, and was that more than just holding the market? The ideas came from four places: classic
+day-trading lore (ideas 1 to 4), academic research (5, 6, 11 and 12), indicator "bots" shown in online videos (9 and 10), and
+the intuition that politics moves stocks (7 and 8).
+
+### Short-term price patterns (minutes to hours, 5-minute bars)
+
+1. **Opening-range breakout.** *The belief:* the first minutes of the trading day set a range, and when price closes beyond it,
+   the move tends to continue. *The test:* trade in the direction of the break with a stop and a target at 1.5 times the
+   risk, and close the trade by the end of the day. Optional filters were unusual volume, an overnight gap and the market's
+   trend. Tried on 10 large stocks, then on 50 fresh ones.
+2. **Failed-breakout fade.** *The belief:* a breakout that fails, with price closing back inside the range, traps the traders
+   who bought it and reverses. *The test:* bet against the failed move, with the stop just beyond its extreme.
+
+### Daily swing trades (days to weeks, daily bars)
+
+3. **RSI(2) mean reversion.** *The belief:* after a sharp two-day fall a stock tends to bounce within days, and to fall back
+   after a sharp rise. *The test:* buy when the 2-day RSI, a gauge of very short-term momentum, is extremely low and sell
+   short when it is extremely high, optionally only in the direction of the 200-day trend.
+4. **20/200-day pullback.** *The belief:* in an established uptrend, a dip back to the 20-day average is a chance to buy
+   cheaply, and the reverse in a downtrend. *The test:* trade the first close back to the 20-day average while the
+   20-day and 200-day averages agree on the trend.
+
+### Events and news (daily bars)
+
+5. **Earnings drift.** *The belief:* when a company reports results and its stock jumps or falls by an unusual amount, it keeps
+   moving the same way for days or weeks. *The test:* take the timing from the exact moment of the SEC filing of each
+   earnings release, measure the market-adjusted reaction in multiples of the stock's normal daily range, and follow (or
+   fade) reactions of one to three ranges.
+6. **Insider buying.** *The belief:* when company officers and directors buy shares with their own money they may know something
+   the market does not, especially if the purchase is out of character ("opportunistic") rather than a habit ("routine").
+   *The test:* trade clusters of purchases at the open after the public SEC filing, with the routine and opportunistic split
+   from an academic paper by Cohen, Malloy and Pomorski.
+7. **Presidential posts.** *The belief:* when the US president praises or attacks a listed company on social media, its stock
+   moves, and a slower trader can still profit. *The test:* find posts that name a company (tweets 2016 to 2018, Truth Social
+   2022 to 2024), take their tone from fixed word lists, enter at the first open after the post, hold five sessions.
+8. **Pentagon contract awards.** *The belief:* a large defence contract lifts the stock of the winner. *The test:* use awards of
+   $100 million or more to seven listed contractors from USAspending.gov, buy at the open two sessions after the award
+   date and hold five sessions.
+
+### Indicator bots popular in online videos (5-minute bars)
+
+9. **UT Bot + Schaff Trend Cycle.** *The belief:* a trailing-stop indicator (UT Bot) flipping direction marks the start of a
+   trend, and a second indicator (Schaff Trend Cycle) confirms it. *The test:* the common open-source definitions, 18 settings,
+   including the video's asymmetric setup with different long and short parameters.
+10. **Supertrend + Waddah Attar Explosion.** *The belief:* a trend line (Supertrend) agreeing with a momentum-surge indicator
+    (Waddah Attar) marks high-quality entries, optionally only when the market is trending (ADX or Choppiness filter).
+    *The test:* 12 settings, with the stop distance used in the video.
+
+### Volume (daily bars)
+
+11. **Volume-dry-up reversal.** *The belief:* a stock that fell (or rose) against the market over a week on shrinking volume was
+    pushed by impatient traders rather than news, and tends to snap back. *The test:* trade against such moves of two to
+    three daily ranges, with and without the volume condition.
+12. **High-volume continuation.** *The belief:* a stock whose volume is the highest in weeks is receiving new attention and tends
+    to drift upward over the following weeks. *The test:* buy on the highest-volume day of the last 20 or 50 sessions, long only.
+
+One more test is a side question, not an idea (section 6): whether a 200-day trend filter makes simply holding the market
+safer.
+
+## 3. How the tests were kept honest
+
+Most backtests that look good are noise that was selected. The framework was built to make that hard: Figure 3 shows the
+method applied to every idea, and the table lists its safeguards.
 
 | Safeguard | What it does |
 |----------|----------------------------------|
@@ -114,7 +196,23 @@ trades is "inconclusive", not a pass.
 A note on units: **R** is profit measured in the amount risked on the trade. +0.1R means the average trade made 10% of
 what it risked, after costs.
 
-## 3. Results
+<!-- diagram:method -->
+```mermaid
+flowchart TD
+  I[New idea] --> P[Pre-register: protocol, grid, pass criteria]
+  P --> R[Run once: walk-forward 2019 to 2024, minus the market]
+  R --> Q{All checks pass?}
+  Q -- no --> X[Close the idea, publish the result]
+  Q -- yes --> U[Repeat on unseen stocks]
+  U --> V{Still passes?}
+  V -- no --> X
+  V -- yes --> H[One run on the holdout, then paper trade]
+```
+<!-- /diagram -->
+
+*Figure 3. The method applied to every idea. Failing at any gate closes the idea and the result is published either way.*
+
+## 4. Results
 
 | Milestone | Idea | Data | Out-of-sample result (95% interval) | Checks passed |
 |--------|-------------------------|--------------------|--------------------|--------|
@@ -138,7 +236,7 @@ so it has its own four criteria. "M4" and "M4b" are the ten-stock and fifty-stoc
 
 Details, protocols and per-year numbers for each row are in `docs/m*-protocol.md` and `docs/m*-results.md`.
 
-## 4. What kept recurring
+## 5. What kept recurring
 
 <!-- diagram:verdicts -->
 ```mermaid
@@ -192,7 +290,7 @@ work finds same-day reactions to tweets about firms
 ([Ajjoub, Walker and Zhao](https://econpapers.repec.org/RePEc:eme:ijmfpp:ijmf-02-2020-0068)), but starting at the next
 open, as a slower trader must, nothing was left.
 
-## 5. A side question: does a trend filter make holding the market safer? (M13)
+## 6. A side question: does a trend filter make holding the market safer? (M13)
 
 Since the market kept beating the rules, I tested the simplest allocation rule: hold SPY while it is above its 200-day
 average, otherwise hold cash. One parameter, fixed in advance, 2017 to 2024:
@@ -208,7 +306,7 @@ of its 26 in-and-out trades lost money. It passed two of three pre-registered ch
 about 4 points a year. Eight years and two crashes are a short sample, and this is research, not advice: how large a fall
 a holder can sit through matters more than these figures.
 
-## 6. What this does not show
+## 7. What this does not show
 
 Absence of evidence in these tests is not proof that no edge exists. The scope was narrow:
 
@@ -225,7 +323,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
   approximately. A paper-trading loop was built and tested against a broker's paper account for plumbing only; nothing was
   run for evidence.
 
-## 7. Takeaways
+## 8. Takeaways
 
 1. **Write the rules down before you look.** Commit them. It removes the most common way to fool yourself.
 2. **Count your tries.** The best of many looks good by luck; deflate for it.
@@ -236,10 +334,10 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
    rarely come with losing runs or costs. They deserve the same test as anything else, and most will fail it.
 7. **A clear "no" is a result.** It saved capital, and the method now makes the next question cheap to test.
 
-## 8. Reproduce it
+## 9. Reproduce it
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(204 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(210 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 ```sh
 uv sync
@@ -251,7 +349,7 @@ The last command reruns one pre-registered sweep (insider buying).
 
 Start with `README.md`, then `docs/m4-protocol.md` for the method and `docs/m*-results.md` for each result.
 
-## 9. Disclosures
+## 10. Disclosures
 
 This is a personal research project. It is not investment advice and recommends no security or strategy. No real money was
 traded. The code, analysis and drafting were done with an AI coding assistant (Claude Code); every number in this report is

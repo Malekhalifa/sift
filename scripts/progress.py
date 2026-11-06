@@ -185,7 +185,7 @@ def sweep_block(name: str, download_alive: bool) -> list[str]:
 def render() -> str:
     dl = download_section()
     alive = running("m tp.recorder")
-    return "\n".join([f"Trading pipeline progress  {datetime.now():%H:%M:%S}", "", *dl, *sweep_section(alive)])
+    return "\n".join([f"Sift progress  {datetime.now():%H:%M:%S}", "", *dl, *sweep_section(alive)])
 
 
 def main() -> None:
