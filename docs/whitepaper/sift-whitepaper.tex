@@ -8,6 +8,7 @@
 \usepackage{microtype}
 \usepackage[table]{xcolor}
 \usepackage{graphicx,calc,array,booktabs,etoolbox,float,needspace,enumitem,lastpage}
+\usepackage[section]{placeins}  % floats never drift past the end of their section
 \usepackage[most]{tcolorbox}
 \setlength{\emergencystretch}{3em}
 \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -81,7 +82,7 @@
 \vspace{0.3cm}
 {\large The Sift project \quad\textperiodcentered\quad \href{https://github.com/Malekhalifa/sift}{github.com/Malekhalifa/sift}\par}
 \vspace{0.3cm}
-{\large 6 November 2026 \quad\textperiodcentered\quad Version 1.0\par}
+{\large 6 November 2026\par}
 \vspace{1.4cm}
 \begin{minipage}{0.88\linewidth}
 \begin{center}\bfseries Abstract\end{center}
@@ -458,7 +459,7 @@ same results as a picture, with their 95\% intervals.
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.0988}}@{}}
 \toprule
 \begin{minipage}[b]{\linewidth}\raggedright
-Milestone
+Test
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Idea
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -527,43 +528,20 @@ earnings drift (M7).
 \begin{table}[tbp]
 \centering
 \caption{Which pre-registered check each idea passed (yes) or failed (no); a dash means the check did not exist yet.}\label{tbl:matrix}
-\begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.3226}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.0968}}@{}}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.28\linewidth}*{7}{>{\centering\arraybackslash}p{0.088\linewidth}}@{}}
 \toprule
-\begin{minipage}[b]{\linewidth}\raggedright
-Idea
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Enough trades
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Above zero
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Deflated Sharpe
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Years
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-2x costs
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Neighbours
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Market-adjusted
-\end{minipage} \\
+Idea & \shortstack{Enough\\trades} & \shortstack{Above\\zero} & \shortstack{Deflated\\Sharpe} & \shortstack{Years\\positive} & \shortstack{2x\\costs} & \shortstack{Neigh-\\bours} & \shortstack{Market-\\adjusted} \\
 \midrule
-Opening-range breakout (M4) & yes & no & no & yes & yes & no & - \\
-Failed-breakout fade (M4) & yes & no & no & no & no & no & - \\
-Opening-range breakout, 50 stocks (M4b) & yes & no & no & no & no & no & - \\
-RSI(2) mean reversion (M6) & yes & no & no & no & no & no & - \\
-20/200-day pullback (M6) & yes & no & no & no & no & no & - \\
-Earnings drift (M7) & yes & yes & no & yes & yes & yes & - \\
+Opening-range breakout (M4) & yes & no & no & yes & yes & no & -- \\
+Failed-breakout fade (M4) & yes & no & no & no & no & no & -- \\
+Opening-range breakout, 50 stocks (M4b) & yes & no & no & no & no & no & -- \\
+RSI(2) mean reversion (M6) & yes & no & no & no & no & no & -- \\
+20/200-day pullback (M6) & yes & no & no & no & no & no & -- \\
+Earnings drift (M7) & yes & yes & no & yes & yes & yes & -- \\
 Earnings drift, replicated (M8) & yes & no & no & no & yes & no & no \\
-UT Bot + Schaff Trend Cycle (M9) & yes & no & no & no & no & no & - \\
-Supertrend + Waddah Attar (M9) & yes & no & no & no & no & no & - \\
+UT Bot + Schaff Trend Cycle (M9) & yes & no & no & no & no & no & -- \\
+Supertrend + Waddah Attar (M9) & yes & no & no & no & no & no & -- \\
 Insider buying (M10) & yes & no & no & no & yes & yes & no \\
 Volume-dry-up reversal (M11) & yes & no & no & no & no & no & no \\
 High-volume continuation (M11) & yes & yes & no & yes & yes & yes & no \\
@@ -755,7 +733,7 @@ uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml
 
 The last command reruns one pre-registered sweep (insider buying).
 
-Start with \texttt{README.md}, then \texttt{docs/m4-protocol.md} for the method and \texttt{docs/m*-results.md} for each result.
+{\sloppy Start with \texttt{README.md}, then \texttt{docs/m4-protocol.md} for the method, and \texttt{docs/m*-results.md} for each result.\par}
 
 % ================================================================ appendices
 \appendix
@@ -801,21 +779,21 @@ Each test has a protocol, committed before the run, and a result write-up, in th
 
 \begin{table}[H]
 \centering
-\caption{Where to find each test's protocol and result.}\label{tbl:index}
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.09\linewidth}>{\raggedright\arraybackslash}p{0.39\linewidth}>{\raggedright\arraybackslash}p{0.25\linewidth}>{\raggedright\arraybackslash}p{0.21\linewidth}@{}}
+\caption{Where to find each test's protocol and result (Markdown files in the \texttt{docs} folder).}\label{tbl:index}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.07\linewidth}>{\raggedright\arraybackslash}p{0.33\linewidth}>{\raggedright\arraybackslash}p{0.27\linewidth}>{\raggedright\arraybackslash}p{0.25\linewidth}@{}}
 \toprule
 Test & Idea & Protocol & Result \\
 \midrule
-M4 & Opening-range breakout, failed-breakout fade & m4-protocol.md & m4-results.md \\
-M4b & Breakout on 50 fresh stocks & m4b-protocol.md & m4b-results.md \\
-M6 & RSI(2) reversion, 20/200-day pullback & m6-swing-protocol.md & m6-results.md \\
-M7 & Earnings-announcement drift & m7-events-protocol.md & m7-results.md \\
-M8 & The same setting on 250 unseen stocks & m8-confirmation-protocol.md & m8-results.md \\
-M9 & UT Bot + STC, Supertrend + Waddah Attar & m9-indicators-protocol.md & m9-results.md \\
-M10 & Insider buying & m10-insider-protocol.md & m10-results.md \\
-M11 & Volume reversal and continuation & m11-volume-protocol.md & m11-volume-results.md \\
-M12 & Presidential posts, Pentagon awards & m12-political-protocol.md & m12-political-results.md \\
-M13 & 200-day trend filter on SPY & m13-trend-filter-protocol.md & m13-trend-filter-results.md \\
+M4 & Opening-range breakout, failed-breakout fade & \texttt{\footnotesize m4-protocol} & \texttt{\footnotesize m4-results} \\
+M4b & Breakout on 50 fresh stocks & \texttt{\footnotesize m4b-protocol} & \texttt{\footnotesize m4b-results} \\
+M6 & RSI(2) reversion, 20/200-day pullback & \texttt{\footnotesize m6-swing-protocol} & \texttt{\footnotesize m6-results} \\
+M7 & Earnings-announcement drift & \texttt{\footnotesize m7-events-protocol} & \texttt{\footnotesize m7-results} \\
+M8 & The same setting on 250 unseen stocks & \texttt{\footnotesize m8-confirmation-protocol} & \texttt{\footnotesize m8-results} \\
+M9 & UT Bot + STC, Supertrend + Waddah Attar & \texttt{\footnotesize m9-indicators-protocol} & \texttt{\footnotesize m9-results} \\
+M10 & Insider buying & \texttt{\footnotesize m10-insider-protocol} & \texttt{\footnotesize m10-results} \\
+M11 & Volume reversal and continuation & \texttt{\footnotesize m11-volume-protocol} & \texttt{\footnotesize m11-volume-results} \\
+M12 & Presidential posts, Pentagon awards & \texttt{\footnotesize m12-political-protocol} & \texttt{\footnotesize m12-political-results} \\
+M13 & 200-day trend filter on SPY & \texttt{\footnotesize m13-trend-filter-protocol} & \texttt{\footnotesize m13-trend-filter-results} \\
 \bottomrule
 \end{tabular}
 \end{table}
