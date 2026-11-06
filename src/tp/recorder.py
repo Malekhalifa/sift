@@ -40,13 +40,16 @@ LAG = {"sip": timedelta(minutes=20), "iex": timedelta(minutes=2)}
 
 def fetch_end(feed: str, timeframe: str, now: datetime) -> datetime:
     """Exclusive upper bound for a fetch, so only finished bars are stored."""
+    # The free tier answers 403 ("subscription does not permit querying recent SIP data") to any request whose end
+    # reaches into the newest minutes, and a future end is the extreme case. Never ask past now minus the feed lag.
+    latest = (now - LAG[feed]).replace(second=0, microsecond=0)
     if timeframe == "1Day":
         # A daily bar is final only after the 20:00 ET extended session closes (+ SIP lag).
         et = now.astimezone(ET)
         midnight = et.replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff = midnight if et.time() < time(20, 30) else midnight + timedelta(days=1)
-        return cutoff.astimezone(UTC)
-    return (now - LAG[feed]).replace(second=0, microsecond=0)
+        return min(cutoff.astimezone(UTC), latest)
+    return latest
 
 
 def sync_series(client: AlpacaClient, feed: str, timeframe: str, symbol: str, now: datetime) -> int:

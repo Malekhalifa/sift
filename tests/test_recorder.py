@@ -25,7 +25,17 @@ def test_fetch_end_daily_waits_for_extended_session_close():
     morning = datetime(2025, 2, 10, 14, 0, tzinfo=UTC)  # 09:00 EST
     evening = datetime(2025, 2, 11, 1, 45, tzinfo=UTC)  # 20:45 EST on Feb 10
     assert recorder.fetch_end("sip", "1Day", morning) == datetime(2025, 2, 10, 5, 0, tzinfo=UTC)
-    assert recorder.fetch_end("sip", "1Day", evening) == datetime(2025, 2, 11, 5, 0, tzinfo=UTC)
+    # after the close the end must still include that day's bar (stamped midnight ET) but never reach past now - 20 min
+    assert recorder.fetch_end("sip", "1Day", evening) == datetime(2025, 2, 11, 1, 25, tzinfo=UTC)
+    assert recorder.fetch_end("sip", "1Day", evening) > datetime(2025, 2, 10, 5, 0, tzinfo=UTC)
+
+
+def test_fetch_end_never_reaches_into_the_newest_minutes():
+    """Regression: the nightly job ran at 21:00 ET, asked for daily bars up to the next midnight (a future time) and
+    every one of 412 requests got HTTP 403 from the free tier."""
+    night = datetime(2025, 2, 11, 2, 0, tzinfo=UTC)  # 21:00 EST, 03:00 in Central Europe
+    for feed, timeframe in (("sip", "1Day"), ("sip", "1Min"), ("sip", "5Min"), ("iex", "1Min")):
+        assert recorder.fetch_end(feed, timeframe, night) <= night - recorder.LAG[feed]
 
 
 def test_fetch_end_minutes_respects_feed_lag():
