@@ -23,7 +23,7 @@ import pandas as pd
 
 from tp import backtest as bt
 from tp import swing
-from tp import config, metrics, stats, store, trials
+from tp import config, insiders, metrics, stats, store, trials
 from tp import walkforward as wf
 from tp.bars import load_bars, split_factor
 from tp.corp_actions import load_splits
@@ -290,6 +290,8 @@ def main() -> int:
         symbols = config.events_symbols()
     elif cfg.get("universe") == "confirm":
         symbols = config.confirm_symbols()
+    elif cfg.get("universe") == "insider":  # events, confirm and the original ten pooled, one symbol per SEC company ID
+        symbols = list(insiders.symbol_ciks())
     else:
         symbols = config.load_universe()["universe"]["traded"]
     problems = coverage_problems(symbols, start, end, timeframe) + coverage_problems(["SPY"], start, end, "1Day")

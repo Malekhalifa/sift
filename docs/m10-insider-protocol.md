@@ -73,6 +73,22 @@ The 2025+ holdout stays untouched. Insider files are downloaded only through 202
 universe has enough purchase filings: 206 purchase filings across 84 of our symbols (all insider types, before any
 classification). No returns were computed.
 
+**Amendment, committed before any return exists:** after the download, events were counted per year for all 16
+configurations (filing data and the classification only, no prices). Purchases by our 408 matched companies from 2016
+on split into 7,222 thin, 889 opportunistic and 704 routine. Events in the test years 2019-2024:
+
+| classes | insiders | min value | events 2019-24 |
+|---|---|---|---|
+| opportunistic | 1 | $100k / $500k | 139 / 68 |
+| opportunistic | 2 | $100k / $500k | 16 / 8 |
+| opportunistic + thin | 1 | $100k / $500k | 1,080 / 534 |
+| opportunistic + thin | 2 | $100k / $500k | 306 / 218 |
+
+Consequence, stated now so it cannot be argued later: the four pure-opportunistic configurations cannot reach the
+300-trade floor on their own, and the grid is **not changed**. A pass can only come from configurations that include
+thin (first-time or occasional) buyers, and the verdict then speaks to "cluster purchases by officers and directors",
+not to the routine/opportunistic split.
+
 ## Costs
 
 Two cents per share each way (mid-cap level, as in M8); the stress test uses four cents.
@@ -89,6 +105,14 @@ Two cents per share each way (mid-cap level, as in M8); the stress test uses fou
    paid) has a 95% interval whose lower bound is above 0R.
 
 If fewer than 300 trades result, the test is **inconclusive, not passed**, and we do not trade it.
+
+## Informational: does routine versus opportunistic show up at all?
+
+Not part of the pass criteria and not tradable, but it tests the paper's claim directly on our data. For each class
+(routine, opportunistic, thin) every purchase event (one insider is enough, at least $100,000, same 10-day window
+and 30-day cooldown) gets one number: the return from the next open to the close 20 sessions later, minus SPY's over the
+same dates, no costs. We report the mean, its 95% interval and the count per class, over 2016-2024 and over
+2019-2024. `scripts/insider_event_study.py`. It adds no trials; the result is a description, not a selection.
 
 ## If it passes
 
