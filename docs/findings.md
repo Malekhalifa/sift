@@ -337,7 +337,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 ## 9. Reproduce it
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(210 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(212 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 ```sh
 uv sync

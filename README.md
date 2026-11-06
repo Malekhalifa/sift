@@ -9,7 +9,7 @@
 A pre-registered research pipeline that tests short-term US stock strategies on free data,<br>
 and catches the ideas that only look like they work.
 
-![tests](https://img.shields.io/badge/tests-210%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-212%20passing-2ea44f)
 ![python](https://img.shields.io/badge/python-3.12%2B-3776ab)
 ![status](https://img.shields.io/badge/status-research%20complete-1f4e79)
 ![holdout](https://img.shields.io/badge/2025%2B%20holdout-untouched-d95f02)
@@ -173,7 +173,7 @@ M0 to M3 and M5 are infrastructure: decisions, a data-depth probe, the recorder,
 ```sh
 uv sync
 cp .env.example .env        # fill in the Alpaca paper keys; .env is gitignored
-uv run pytest               # 210 tests
+uv run pytest               # 212 tests
 uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml   # rerun one pre-registered sweep
 uv run python scripts/build_report.py                                    # rebuild the PDF (needs pandoc + XeLaTeX)
 ```
@@ -277,7 +277,7 @@ Overfitting guards:
 - **Trial registry.** Every run is appended to `data/trials.sqlite`. The count per strategy feeds the Deflated Sharpe check.
 - **Holdout.** Data from `config.HOLDOUT_START` (2025-01-01) is refused unless `--use-holdout` is passed, and such runs are flagged. Keep it for the final validation only.
 
-Verification: the test suite (210 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
+Verification: the test suite (212 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
 
 #### Baseline result (plumbing check, not a finding)
 
