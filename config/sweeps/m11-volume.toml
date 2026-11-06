@@ -1,0 +1,29 @@
+# M11 pre-registered sweep: two volume-conditioned daily strategies (Fable's hypotheses H1 and H2,
+# docs/ideas/candle-strategies.md). Frozen when committed. Changing any value means a new name; trials already
+# logged keep counting.
+name = "m11-volume-v1"
+engine = "swing"
+universe = "daily"                 # original ten + events (contains the wide 50) + confirm: 410 names, daily bars
+bar_timeframe = "1Day"             # SIP daily bars, split-adjusted
+period_start = "2016-01-04"
+period_end = "2024-12-31"          # must stay before config.HOLDOUT_START
+test_years = [2019, 2020, 2021, 2022, 2023, 2024]
+min_train_trades = 200
+slippage = 0.02                    # $ per share, as-traded, each market fill (mid-cap level, as M8 and M10)
+stress_slippage = 0.04             # the 2x cost check
+max_positions = 10                 # portfolio view only; the pass criteria use every simulated trade
+regime_check = false
+drop_incomplete = true             # symbols whose daily history does not cover the whole period are dropped
+market_adjusted_check = true
+
+[volrev.grid]                      # H1: 2 x 2 x 2 x 2 = 16 configurations
+mult = [2.0, 3.0]
+vol_max = [0.0, 1.0]               # 0.0 = no volume condition
+stop_atr = [1.5, 2.5]
+max_hold = [5, 10]
+
+[volspike.grid]                    # H2: 2 x 2 x 2 x 2 = 16 configurations, long only
+window = [20, 50]
+ret_max = [0.0, 1.0]               # 0.0 = no cap on the day's move
+stop_atr = [1.5, 2.5]
+max_hold = [10, 20]

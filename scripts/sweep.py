@@ -180,6 +180,15 @@ def analyse_family(family, cfg, data, cost, risk, name, raws, signals, params_by
     stress = pd.concat(stress_parts)
     out["stress"] = metrics.r_stats(stress["pnl_R"])
 
+    # informational: the same chosen configurations with no costs at all, to see whether there is any gross edge
+    zero_cost = bt.CostModel(slippage=0.0, limit_trade_through=0.0, sell_fee_bps=0.0)
+    zero_parts = []
+    for cid in sorted({f.config_id for f in folds if f.config_id}):
+        zraw, _ = data.engine.simulate_signals(signals[cid], data.prepared, zero_cost, risk)
+        zdf = raw_frame(zraw)
+        zero_parts.append(zdf[zdf["year"].isin([f.test_year for f in folds if f.config_id == cid])])
+    out["zero_cost"] = metrics.r_stats(pd.concat(zero_parts)["pnl_R"])
+
     diag = wf.grid_diagnostics(raws, test_years)
     modal = pd.Series([f.config_id for f in folds if f.config_id]).mode().iloc[-1]
     keys = grid_keys(cfg[family])
@@ -247,6 +256,7 @@ def format_family(o: dict, cfg: dict) -> str:
         f"{d['n_trials']} trials logged, benchmark SR/day {fmt(d['benchmark_sharpe'], '.4f')}",
         f"  P(Sharpe > 0) = {fmt(d['psr_vs_zero'], '.3f')}    DSR = {fmt(d['dsr'], '.3f')}",
         f"2x slippage (${cfg['stress_slippage']:.3f}): expectancy {fmt(o['stress']['expectancy_R'], '+.3f')}R over {o['stress']['n']} trades",
+        f"Zero cost (informational): expectancy {fmt(o['zero_cost']['expectancy_R'], '+.3f')}R +-{fmt(o['zero_cost']['expectancy_ci95_R'])} over {o['zero_cost']['n']} trades",
         f"Whole grid, out-of-sample: {g['configs']} configs, {100 * g['share_positive_oos']:.0f}% positive, "
         f"median {fmt(g['median_oos_expectancy_R'], '+.3f')}R, best {fmt(g['best_oos_expectancy_R'], '+.3f')}R",
         f"Modal choice {o['modal_config']['id']}: {o['modal_config']['params']}",
@@ -290,6 +300,8 @@ def main() -> int:
         symbols = config.events_symbols()
     elif cfg.get("universe") == "confirm":
         symbols = config.confirm_symbols()
+    elif cfg.get("universe") == "daily":  # every stock with daily history only: the original ten, events (incl. wide) and confirm
+        symbols = list(dict.fromkeys([*config.load_universe()["universe"]["traded"], *config.events_symbols(), *config.confirm_symbols()]))
     elif cfg.get("universe") == "insider":  # events, confirm and the original ten pooled, one symbol per SEC company ID
         symbols = list(insiders.symbol_ciks())
     else:

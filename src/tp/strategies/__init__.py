@@ -6,6 +6,7 @@ from tp.strategies.pullback import MAPullback, PullbackParams
 from tp.strategies.rsi2 import RSI2Params, RSI2Reversion
 from tp.strategies.stack import StackParams, SuperTrendWAE
 from tp.strategies.utstc import UTBotSTC, UTSTCParams
+from tp.strategies.volume import VolRevParams, VolSpikeParams, VolumeReversal, VolumeSpike
 
 REGISTRY = {
     "orb": OpeningRangeBreakout,
@@ -14,6 +15,8 @@ REGISTRY = {
     "pullback": MAPullback,
     "ead": EarningsDrift,
     "insider": InsiderBuys,
+    "volrev": VolumeReversal,
+    "volspike": VolumeSpike,
     "utstc": UTBotSTC,
     "stack": SuperTrendWAE,
 }
@@ -21,5 +24,5 @@ REGISTRY = {
 __all__ = [
     "REGISTRY", "EADParams", "EarningsDrift", "FadeParams", "FailedBreakoutFade", "InsiderBuys", "InsiderParams", "MAPullback", "ORBParams",
     "OpeningRangeBreakout", "PullbackParams", "RSI2Params", "RSI2Reversion", "StackParams", "SuperTrendWAE",
-    "UTBotSTC", "UTSTCParams",
+    "UTBotSTC", "UTSTCParams", "VolRevParams", "VolSpikeParams", "VolumeReversal", "VolumeSpike",
 ]
