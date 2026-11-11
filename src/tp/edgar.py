@@ -53,6 +53,22 @@ def parse_earnings(pages: list[dict]) -> pd.DataFrame:
     out["filed_at"] = pd.to_datetime(out["filed_at"], utc=True)
     return out.drop_duplicates("accession").sort_values("filed_at").reset_index(drop=True)
 
+def parse_eightk(pages: list[dict]) -> pd.DataFrame:
+    """Every 8-K (not amendments) from submission pages, with its item codes as a comma-separated string.
+    filed_at is the EDGAR acceptance time in UTC."""
+    rows = []
+    for page in pages:
+        cols = page.get("filings", {}).get("recent", page)
+        for form, items, accepted, accession in zip(
+            cols.get("form", []), cols.get("items", []), cols.get("acceptanceDateTime", []), cols.get("accessionNumber", []), strict=False
+        ):
+            if form == "8-K":
+                codes = ",".join(i.strip() for i in str(items).split(",") if i.strip())
+                rows.append({"accession": accession, "filed_at": pd.Timestamp(accepted), "items": codes})
+    out = pd.DataFrame(rows, columns=["accession", "filed_at", "items"])
+    out["filed_at"] = pd.to_datetime(out["filed_at"], utc=True)
+    return out.drop_duplicates("accession").sort_values("filed_at").reset_index(drop=True)
+
 
 class EdgarClient:
     def __init__(self, cache_dir: Path | None = None, http: httpx.Client | None = None):
@@ -88,3 +104,10 @@ class EdgarClient:
         for extra in main.get("filings", {}).get("files", []):
             pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
         return parse_earnings(pages)
+
+    def eightk_filings(self, cik: int) -> pd.DataFrame:
+        main = self._get_json(SUBMISSIONS_URL.format(name=f"CIK{cik:010d}.json"), f"CIK{cik:010d}.json")
+        pages = [main]
+        for extra in main.get("filings", {}).get("files", []):
+            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
+        return parse_eightk(pages)
