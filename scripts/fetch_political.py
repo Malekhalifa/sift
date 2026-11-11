@@ -5,10 +5,10 @@
 - posts.parquet: Donald Trump's original posts with UTC timestamps. Tweets 2016-2018 from the bpb27 archive (timestamps
   carry a UTC offset; the later CSV archive's clock is inconsistent, so 2019-2021 is left out), Truth Social 2022-02 to
   today from CNN's archive. Reposts are dropped.
-- dod_awards.parquet: Department of Defense contract transactions of at least $100 million, 2016-2024, from the official
+- dod_awards.parquet: Department of Defense contract transactions of at least $100 million, 2016 to date, from the official
   USAspending.gov API (action date, recipient, amount).
 
-Nothing after 2024 is read by any M12 analysis until the protocol's holdout rule allows it; the files hold later posts
+Nothing from 2025 on is read by any M12 analysis until the protocol's holdout rule allows it; the files hold later posts
 so the holdout run does not need a second download.
 """
 
@@ -57,38 +57,38 @@ def fetch_truth(http: httpx.Client) -> pd.DataFrame:
     return pd.DataFrame({"source": "truth", "id": df["id"].astype(str), "ts": pd.to_datetime(df["created_at"], utc=True), "text": text})[keep]
 
 
-def fetch_awards(http: httpx.Client) -> pd.DataFrame:
+def fetch_awards(http: httpx.Client, since: pd.Timestamp | None = None) -> pd.DataFrame:
     rows = []
-    for year in range(2016, 2025):
-        for month in range(1, 13):
-            start = f"{year}-{month:02d}-01"
-            end = (pd.Timestamp(start) + pd.offsets.MonthEnd(0)).strftime("%Y-%m-%d")
-            page = 1
-            while True:
-                body = {
-                    "filters": {
-                        "agencies": [{"type": "awarding", "tier": "toptier", "name": "Department of Defense"}],
-                        "award_type_codes": ["A", "B", "C", "D"],
-                        "time_period": [{"start_date": start, "end_date": end}],
-                        "award_amounts": [{"lower_bound": political.MIN_AWARD}],
-                    },
-                    "fields": ["Award ID", "Recipient Name", "Action Date", "Transaction Amount"],
-                    "sort": "Transaction Amount", "order": "desc", "limit": 100, "page": page,
-                }
-                for attempt in range(4):
-                    r = http.post(USASPENDING, json=body)
-                    if r.status_code < 500:
-                        break
-                    time.sleep(2 * (attempt + 1))
-                r.raise_for_status()
-                data = r.json()
-                rows += [x for x in data["results"] if (x.get("Transaction Amount") or 0) >= political.MIN_AWARD]
-                # results are sorted by transaction amount, so stop once a page reaches transactions below the threshold
-                small = [x for x in data["results"] if (x.get("Transaction Amount") or 0) < political.MIN_AWARD]
-                if small or not data.get("page_metadata", {}).get("hasNext"):
+    first = since.to_period("M").start_time if since is not None else pd.Timestamp(2016, 1, 1)
+    for month_start in pd.date_range(first, pd.Timestamp.today().normalize(), freq="MS"):
+        start = month_start.strftime("%Y-%m-%d")
+        end = (pd.Timestamp(start) + pd.offsets.MonthEnd(0)).strftime("%Y-%m-%d")
+        page = 1
+        while True:
+            body = {
+                "filters": {
+                    "agencies": [{"type": "awarding", "tier": "toptier", "name": "Department of Defense"}],
+                    "award_type_codes": ["A", "B", "C", "D"],
+                    "time_period": [{"start_date": start, "end_date": end}],
+                    "award_amounts": [{"lower_bound": political.MIN_AWARD}],
+                },
+                "fields": ["Award ID", "Recipient Name", "Action Date", "Transaction Amount"],
+                "sort": "Transaction Amount", "order": "desc", "limit": 100, "page": page,
+            }
+            for attempt in range(4):
+                r = http.post(USASPENDING, json=body)
+                if r.status_code < 500:
                     break
-                page += 1
-            print(f"  awards {start[:7]}: {len(rows):,} so far", file=sys.stderr)
+                time.sleep(2 * (attempt + 1))
+            r.raise_for_status()
+            data = r.json()
+            rows += [x for x in data["results"] if (x.get("Transaction Amount") or 0) >= political.MIN_AWARD]
+            # results are sorted by transaction amount, so stop once a page reaches transactions below the threshold
+            small = [x for x in data["results"] if (x.get("Transaction Amount") or 0) < political.MIN_AWARD]
+            if small or not data.get("page_metadata", {}).get("hasNext"):
+                break
+            page += 1
+        print(f"  awards {start[:7]}: {len(rows):,} so far", file=sys.stderr)
     df = pd.DataFrame(rows).rename(columns={"Award ID": "award_id", "Recipient Name": "recipient", "Action Date": "action_date",
                                             "Transaction Amount": "amount"})
     df["action_date"] = pd.to_datetime(df["action_date"])
@@ -102,10 +102,10 @@ def main() -> int:
         posts = pd.concat([fetch_tweets(http), fetch_truth(http)], ignore_index=True).sort_values("ts").reset_index(drop=True)
         posts.to_parquet(political.posts_path(), index=False)
         print(f"{len(posts):,} original posts ({posts['source'].value_counts().to_dict()}); {posts['ts'].min():%Y-%m-%d} to {posts['ts'].max():%Y-%m-%d}")
-        if not political.awards_path().exists():
-            awards = fetch_awards(http)
-            awards.to_parquet(political.awards_path(), index=False)
-        awards = pd.read_parquet(political.awards_path())
+        old = pd.read_parquet(political.awards_path()) if political.awards_path().exists() else None
+        new = fetch_awards(http, None if old is None else old["action_date"].max())
+        awards = new if old is None else pd.concat([old, new]).drop_duplicates(["award_id", "action_date", "amount"])
+        awards.sort_values("action_date").to_parquet(political.awards_path(), index=False)
         print(f"{len(awards):,} DoD contract transactions of at least ${political.MIN_AWARD:,}; {awards['action_date'].min():%Y-%m-%d} to {awards['action_date'].max():%Y-%m-%d}")
     return 0
 
