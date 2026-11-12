@@ -43,14 +43,15 @@ def layout(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "pyproject.toml").write_text("")
-    uv = tmp_path / "bin" / "uv"
-    uv.parent.mkdir()
-    uv.write_text("")
+    python = repo / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
     (repo / ".env").write_text(
         f"ALPACA_API_KEY_ID={SECRET_VALUE}\nALPACA_API_SECRET_KEY={SECRET_VALUE}\n"
         f"APIFY_API_KEY={SECRET_VALUE}\nSEC_USER_AGENT={SECRET_VALUE}\n"
     )
-    return ls.Layout(repo=repo, data_dir=repo / "data", uv=str(uv))
+    return ls.Layout(repo=repo, data_dir=repo / "data")
 
 
 @pytest.fixture
@@ -83,7 +84,7 @@ def test_plists_have_keepalive_label_and_working_directory_and_no_secrets(layout
     assert rec["KeepAlive"] is True and rec["RunAtLoad"] is True
     assert rec["ProcessType"] == "Interactive"
     assert rec["ThrottleInterval"] == 30
-    assert rec["ProgramArguments"] == [layout.uv, "run", "--frozen", "--no-dev", "python", "-m", "tp.collect", "run"]
+    assert rec["ProgramArguments"] == [str(layout.repo / ".venv" / "bin" / "python"), "-m", "tp.collect", "run"]
     assert rec["WorkingDirectory"] == str(layout.repo)
     assert rec["StandardOutPath"] == str(layout.data_dir / "logs" / "collect-recorder.log")
     assert rec["StandardErrorPath"] == rec["StandardOutPath"]
@@ -93,13 +94,14 @@ def test_plists_have_keepalive_label_and_working_directory_and_no_secrets(layout
     assert qa["ProcessType"] == "Background"
     assert "ThrottleInterval" not in qa
     assert qa["StartCalendarInterval"] == {"Hour": 6, "Minute": 15}
-    assert qa["ProgramArguments"] == [layout.uv, "run", "--frozen", "--no-dev", "python", "-m", "tp.collect", "qa"]
+    assert qa["ProgramArguments"] == [str(layout.repo / ".venv" / "bin" / "python"), "-m", "tp.collect", "qa"]
     assert qa["WorkingDirectory"] == str(layout.repo)
     assert qa["StandardOutPath"] == str(layout.data_dir / "logs" / "collect-qa.log")
 
     for plist in (rec, qa):
         assert set(plist["EnvironmentVariables"]) == {"PATH"}
-        assert str(Path(layout.uv).parent) in plist["EnvironmentVariables"]["PATH"].split(":")
+        assert plist["ProgramArguments"][0] == layout.python
+        assert "uv" not in [Path(arg).name for arg in plist["ProgramArguments"]] and "run" not in plist["ProgramArguments"][1:-1]
         text = "\n".join(flatten(plist))
         for banned in ("APIFY", "ALPACA", "SEC_USER_AGENT", SECRET_VALUE):
             assert banned not in text
@@ -218,6 +220,7 @@ def test_preflight_clean_layout_has_no_errors(layout, agents, monkeypatch):
     monkeypatch.setattr(ls, "_free_gb", lambda p: 500.0)
     errors, warnings = ls.preflight(layout, agents_dir=agents, port_free=lambda p: True)
     assert errors == []
+    assert Path(layout.python).is_file()  # the fixture's venv python is present
 
 
 def test_preflight_reports_missing_env_keys_by_name_never_values(layout, agents):
@@ -258,7 +261,7 @@ def test_preflight_port_in_use_is_an_error_unless_our_agent_is_installed(layout,
     assert any("9120" in w for w in warnings)
 
 
-def test_preflight_low_disk_and_missing_uv(layout, agents, monkeypatch):
+def test_preflight_low_disk(layout, agents, monkeypatch):
     monkeypatch.setattr(ls, "_free_gb", lambda p: 3.0)
     errors, _ = ls.preflight(layout, agents_dir=agents, port_free=lambda p: True)
     assert any("free" in e for e in errors)
@@ -266,9 +269,17 @@ def test_preflight_low_disk_and_missing_uv(layout, agents, monkeypatch):
     errors, warnings = ls.preflight(layout, agents_dir=agents, port_free=lambda p: True)
     assert errors == [] and any("free" in w for w in warnings)
 
-    bad = ls.Layout(repo=layout.repo, data_dir=layout.data_dir, uv="")
+
+def test_preflight_reports_a_missing_or_non_executable_venv_python(layout, agents, monkeypatch):
+    monkeypatch.setattr(ls, "_free_gb", lambda p: 500.0)
+    bad = layout
+    python = Path(bad.python)
+    python.chmod(0o644)
     errors, _ = ls.preflight(bad, agents_dir=agents, port_free=lambda p: True)
-    assert any("uv" in e for e in errors)
+    assert any("not executable" in e and "uv sync --frozen --no-dev" in e for e in errors)
+    python.unlink()
+    errors, _ = ls.preflight(bad, agents_dir=agents, port_free=lambda p: True)
+    assert any(str(python) in e and "uv sync --frozen --no-dev" in e for e in errors)
 
 
 def test_preflight_data_dir_not_writable(layout, agents):
@@ -307,7 +318,7 @@ def test_metrics_port_comes_from_collect_toml(layout, agents):
 
     (layout.repo / "config").mkdir()
     (layout.repo / "config" / "collect.toml").write_text("[metrics]\nport = 9555\n")
-    custom = ls.Layout(repo=layout.repo, data_dir=layout.data_dir, uv=layout.uv, port=ls.metrics_port(layout.repo))
+    custom = ls.Layout(repo=layout.repo, data_dir=layout.data_dir, port=ls.metrics_port(layout.repo))
     errors, _ = ls.preflight(custom, agents_dir=agents, port_free=lambda p: False)
     assert any("9555" in e for e in errors)
 

@@ -6,14 +6,16 @@ The recorder (`tp.collect`) is one daemon plus one daily QA job, both launchd us
 
 ## Install
 
-Check first, change nothing:
+The agents run the project venv's interpreter directly (`.venv/bin/python -m tp.collect ...`), with no `uv` in between,
+so the process launchd tracks is the daemon itself. Build that venv first, then check without changing anything:
 
 ```sh
+uv sync --frozen --no-dev
 uv run python -m tp.collect.tools.local_stack install --dry-run
 ```
 
 It prints the preflight result (errors stop the install, warnings do not), then the two plists it would write and the
-`launchctl` commands it would run. Preflight checks that `uv` is on PATH, the data directory is writable, at least 10 GB
+`launchctl` commands it would run. Preflight checks that `.venv/bin/python` exists and is executable (otherwise it says to run `uv sync --frozen --no-dev` first), the data directory is writable, at least 10 GB
 is free (20 GB warns), port 9120 is free, and `.env` has `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` and
 `SEC_USER_AGENT`. It reports a missing key by name only and never prints a value. `APIFY_API_KEY` is only required while
 `congress_trades` is enabled. The plists contain no secrets: the tools read `.env` themselves and the only environment
@@ -27,10 +29,21 @@ uv run python -m tp.collect.tools.local_stack install
 
 | Agent | What it does | Log |
 | --- | --- | --- |
-| `com.sift.recorder` | `uv run python -m tp.collect run`, restarted by launchd whenever it exits (KeepAlive, Interactive) | `data/logs/collect-recorder.log` |
-| `com.sift.qa` | `uv run python -m tp.collect qa` every day at 06:15 local time (Background) | `data/logs/collect-qa.log` |
+| `com.sift.recorder` | `.venv/bin/python -m tp.collect run`, restarted by launchd whenever it exits (KeepAlive, Interactive) | `data/logs/collect-recorder.log` |
+| `com.sift.qa` | `.venv/bin/python -m tp.collect qa` every day at 06:15 local time (Background) | `data/logs/collect-qa.log` |
 
 Installing again is safe: loaded agents are stopped and loaded again.
+
+After pulling new code or changing dependencies, rebuild the venv and restart the daemon (the daemon is the launchd pid,
+so this restarts exactly it):
+
+```sh
+uv sync --frozen --no-dev
+launchctl kickstart -k gui/$(id -u)/com.sift.recorder
+```
+
+Check that no `uv` parent remains: `pgrep -f 'tp.collect run'` must print exactly one pid, and
+`ps -o ppid= -p <that pid>` must print `1` (its parent is launchd).
 
 ## Status
 
@@ -130,12 +143,16 @@ promtool check rules deploy/sift_alerts.yml
 ## Testing the dead-man alert
 
 Do not use `launchctl stop com.sift.recorder`: the agent has KeepAlive, so launchd relaunches it within seconds and
-Prometheus never sees `up == 0`. Freeze the process instead, so the scrape hangs and `up` goes to 0:
+Prometheus never sees `up == 0`. Freeze the process instead, so the scrape hangs and `up` goes to 0. The daemon is the
+launchd-tracked process, so the signal reaches it. Verify that before relying on the alert:
 
 ```sh
+pgrep -f 'tp.collect run'        # exactly one pid, whose parent is launchd (ps -o ppid= -p <pid> prints 1)
 launchctl kill SIGSTOP gui/$(id -u)/com.sift.recorder     # scrape hangs; SiftTargetDown fires after its 2m `for`
+curl -s -m 5 http://127.0.0.1:9120/metrics                # must time out; if it still answers, the stop did not reach the daemon
 # ... wait for the Telegram alert (about 3 to 4 minutes) ...
 launchctl kill SIGCONT gui/$(id -u)/com.sift.recorder     # the daemon resumes; the alert resolves by itself
+curl -s -m 5 http://127.0.0.1:9120/metrics | head -3      # answers again
 ```
 
 `launchctl bootout gui/$(id -u)/com.sift.recorder` also triggers the alert, but it unloads the agent, so nothing brings

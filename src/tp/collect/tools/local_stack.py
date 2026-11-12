@@ -5,6 +5,9 @@
     uv run python -m tp.collect.tools.local_stack status
     uv run python -m tp.collect.tools.local_stack uninstall            # keeps all data and logs
 
+Run `uv sync --frozen --no-dev` first: the agents run the venv's interpreter (`.venv/bin/python`) directly, with no
+`uv` in between, so launchd's tracked pid is the daemon and KeepAlive, SIGTERM on stop and signals reach it.
+
 com.sift.recorder keeps `python -m tp.collect run` alive (KeepAlive, Interactive). com.sift.qa runs
 `python -m tp.collect qa` every day at 06:15 local time (Background). The plists hold no secrets: the tools read
 `.env` themselves, so the only environment variable set is PATH. `install` is idempotent: agents that are already
@@ -40,7 +43,7 @@ ALERT_DISK_GB = 10  # SiftDiskLow fires below this
 WARN_DISK_GB = 20
 ENV_REQUIRED = ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY", "SEC_USER_AGENT")
 ENV_APIFY = "APIFY_API_KEY"
-SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
+SYSTEM_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
 Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
 PortProbe = Callable[[int], bool]
@@ -50,12 +53,16 @@ PortProbe = Callable[[int], bool]
 class Layout:
     repo: Path
     data_dir: Path
-    uv: str  # absolute path of the uv binary; "" when not found
     port: int = DEFAULT_PORT
 
     @property
     def log_dir(self) -> Path:
         return self.data_dir / "logs"
+
+    @property
+    def python(self) -> str:
+        """The project venv's interpreter, run directly so launchd's tracked pid is the daemon itself."""
+        return str(self.repo / ".venv" / "bin" / "python")
 
     @property
     def env_file(self) -> Path:
@@ -89,18 +96,13 @@ def metrics_port(repo: Path) -> int:
 
 def default_layout() -> Layout:
     repo = config.ROOT
-    return Layout(repo=repo, data_dir=repo / "data", uv=shutil.which("uv") or "", port=metrics_port(repo))
-
-
-def _path_env(uv: str) -> str:
-    dirs = ([str(Path(uv).parent)] if uv else []) + list(SYSTEM_PATH)
-    return ":".join(dict.fromkeys(dirs))
+    return Layout(repo=repo, data_dir=repo / "data", port=metrics_port(repo))
 
 
 def build_jobs(layout: Layout) -> list[Job]:
     """The recorder first, then the QA job."""
-    env = {"PATH": _path_env(layout.uv)}
-    base = [layout.uv, "run", "--frozen", "--no-dev", "python", "-m", "tp.collect"]
+    env = {"PATH": ":".join(SYSTEM_PATH)}
+    base = [layout.python, "-m", "tp.collect"]
     return [
         Job("recorder", [*base, "run"], layout.repo, "collect-recorder.log", env, process_type="Interactive", throttle_s=THROTTLE_S),
         Job("qa", [*base, "qa"], layout.repo, "collect-qa.log", env, daily_at=QA_AT, process_type="Background"),
@@ -181,8 +183,9 @@ def preflight(
     """(errors, warnings). Errors stop `install`. `.env` is checked by key name only; values are never shown."""
     errors: list[str] = []
     warnings: list[str] = []
-    if not layout.uv or not Path(layout.uv).is_file():
-        errors.append("uv not found on PATH: install it (brew install uv)")
+    python = Path(layout.python)
+    if not python.is_file() or not os.access(python, os.X_OK):
+        errors.append(f"{python} is missing or not executable: run `uv sync --frozen --no-dev` first")
     if not (layout.repo / "pyproject.toml").is_file():
         errors.append(f"{layout.repo} is not the repo root (no pyproject.toml)")
 
