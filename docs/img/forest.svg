@@ -6,7 +6,7 @@
 <rect x="10" y="252.0" width="1020" height="42" fill="#f6f5f4"/>
 <rect x="10" y="168.0" width="1020" height="42" fill="#f6f5f4"/>
 <rect x="10" y="84.0" width="1020" height="42" fill="#f6f5f4"/>
-<text x="20" y="32" font-size="22" font-weight="600" fill="#1a1a1a">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>
+<text x="20" y="32" font-size="22" font-weight="600" fill="#1a1a1a">Out-of-sample expectancy per trade, first twelve ideas (R, after costs)</text>
 <text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Red = after subtracting what simply holding the market earned.</text>
 <line x1="395.0" y1="76" x2="395.0" y2="588" stroke="#cfcfcf" stroke-width="1" stroke-dasharray="3 4"/>
 <text x="395.0" y="608" font-size="14" text-anchor="middle" fill="#5b6672">-0.2R</text>

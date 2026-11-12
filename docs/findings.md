@@ -275,7 +275,7 @@ same results as a picture, with their 95% intervals.
 | M12 | Presidential posts naming a listed company | 133 events | -0.05% +-0.60 per event | 1 of 4 |
 | M12 | Large Pentagon awards to listed primes | 933 events | -0.10% +-0.27 per event | 1 of 4 |
 
-![Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals](img/forest.svg)
+![Out-of-sample expectancy per trade for the first twelve ideas, with 95% confidence intervals](img/forest.svg)
 
 *Figure 3. Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge.
 Grey dots: as tested. Red diamonds: after subtracting what simply holding the market earned over the same dates, a check added

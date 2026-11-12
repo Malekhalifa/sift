@@ -38,7 +38,7 @@ def main() -> None:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{height}" viewBox="0 0 {WIDTH} {height}" '
         f'font-family="Latin Modern Roman, CMU Serif, Georgia, serif" role="img" aria-label="Out-of-sample expectancy per trading idea">',
         f'<rect width="{WIDTH}" height="{height}" fill="white"/>',
-        f'<text x="20" y="32" font-size="22" font-weight="600" fill="{INK}">Out-of-sample expectancy per trade, twelve ideas (R, after costs)</text>',
+        f'<text x="20" y="32" font-size="22" font-weight="600" fill="{INK}">Out-of-sample expectancy per trade, first twelve ideas (R, after costs)</text>',
         f'<text x="20" y="56" font-size="14.5" fill="#5b6672">Dot = result, line = 95% confidence interval. Zero means no edge. Red = after subtracting what simply holding the market earned.</text>',
     ]
     for tick in (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3):
