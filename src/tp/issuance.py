@@ -37,8 +37,8 @@ def signal_at(issuance: pd.DataFrame, sessions: pd.DatetimeIndex) -> pd.Series:
     STALE_DAYS earlier (highest = fewest new shares). NaN where none."""
     if issuance.empty:
         return pd.Series(np.nan, index=sessions)
-    iss = issuance.sort_values("filed").drop_duplicates("filed", keep="last")
-    left = pd.DataFrame({"date": sessions})
-    m = pd.merge_asof(left, iss.rename(columns={"filed": "filed"}), left_on="date", right_on="filed", direction="backward", allow_exact_matches=False)
+    iss = issuance.assign(filed=issuance["filed"].astype("datetime64[ns]")).sort_values("filed").drop_duplicates("filed", keep="last")
+    left = pd.DataFrame({"date": pd.DatetimeIndex(sessions).astype("datetime64[ns]")})
+    m = pd.merge_asof(left, iss, left_on="date", right_on="filed", direction="backward", allow_exact_matches=False)
     fresh = (m["date"] - m["filed"]).dt.days <= STALE_DAYS
     return pd.Series(np.where(fresh, -m["issuance"], np.nan), index=sessions)
