@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from tp.collect.source import Source
 from tp.collect.sources.alpaca_bars import AlpacaBars
-from tp.collect.sources.sec import SecFilings
+from tp.collect.sources.sec import SecFilings, SecForm4, SecXbrlShares
 
 
 def source_settings(settings: dict, name: str) -> dict:
@@ -20,4 +20,8 @@ def build_sources(settings: dict) -> list[Source]:
     sources.append(AlpacaBars(cfg["schedule"], cfg["lag_minutes"]))
     cfg = source_settings(settings, "sec_filings")
     sources.append(SecFilings(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "sec_form4")
+    sources.append(SecForm4(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "sec_xbrl_shares")
+    sources.append(SecXbrlShares(cfg["schedule"], cfg["lag_minutes"]))
     return sources

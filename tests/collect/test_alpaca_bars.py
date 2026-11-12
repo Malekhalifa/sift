@@ -12,6 +12,8 @@ NOW = datetime(2025, 2, 11, 2, 0, tzinfo=UTC)  # 21:00 EST
 SETTINGS = {"sources": {
     "alpaca_bars": {"schedule": "daily 21:00 America/New_York", "lag_minutes": 20},
     "sec_filings": {"schedule": "daily 07:30 America/New_York", "lag_minutes": 0},
+    "sec_form4": {"schedule": "daily 08:00 America/New_York", "lag_minutes": 0},
+    "sec_xbrl_shares": {"schedule": "weekly sun 09:00 America/New_York", "lag_minutes": 0},
 }}
 
 

@@ -34,6 +34,7 @@ def test_keys_and_timestamp_columns():
     assert dataset("eightk").key == ("symbol", "accession")
     assert dataset("earnings").key == ("symbol", "accession")
     assert dataset("tenk_index").key == ("symbol", "accn")
+    assert dataset("xbrl_shares").key == ("accn", "symbol", "end")
 
 
 def test_settings_have_ports_and_cap():
