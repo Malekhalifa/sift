@@ -62,6 +62,22 @@ def test_age_and_qa_gauges_are_labelled(metrics, registry):
     assert value(registry, "sift_qa_failures", source="bars", check="future_ts") == 0
 
 
+def test_clear_qa_removes_one_series_and_tolerates_a_missing_one(metrics, registry):
+    metrics.set_qa("bars", "a", 1)
+    metrics.set_qa("bars", "b", 1)
+    metrics.clear_qa("bars", "b")
+    metrics.clear_qa("bars", "b")
+    metrics.clear_qa("never", "set")
+    assert value(registry, "sift_qa_failures", source="bars", check="a") == 1
+    assert value(registry, "sift_qa_failures", source="bars", check="b") is None
+
+
+def test_qa_report_age_gauge_is_unset_until_given(metrics, registry):
+    assert value(registry, "sift_qa_report_age_seconds") is None
+    metrics.set_qa_report_age(42.5)
+    assert value(registry, "sift_qa_report_age_seconds") == 42.5
+
+
 def test_stale_after_gauge_is_labelled_by_source(metrics, registry):
     metrics.set_stale_after("bars", 120.0)
     metrics.set_stale_after("filings", 7200.0)
@@ -83,6 +99,7 @@ def test_exported_series_names_are_exact(metrics, registry):
     metrics.set_age("bars", 1)
     metrics.set_stale_after("bars", 2)
     metrics.set_qa("bars", "c", 0)
+    metrics.set_qa_report_age(1)
     metrics.set_disk_free(1)
     metrics.set_apify_spend(0.0)
     text = generate_latest(registry).decode()
@@ -95,6 +112,7 @@ def test_exported_series_names_are_exact(metrics, registry):
         "sift_source_run_seconds_count",
         "sift_source_run_seconds_sum",
         "sift_qa_failures",
+        "sift_qa_report_age_seconds",
         "sift_disk_free_bytes",
         "sift_apify_spend_usd_month",
     } <= series
@@ -150,6 +168,7 @@ def test_metric_names_match_the_alert_rules(metrics, registry):
     metrics.set_age("x", 0)
     metrics.set_stale_after("x", 0)
     metrics.set_qa("x", "c", 0)
+    metrics.set_qa_report_age(0)
     metrics.set_disk_free(0)
     metrics.set_apify_spend(0)
     exported = set(re.findall(r"^(sift_\w+?)(?:\{| )", generate_latest(registry).decode(), re.M))

@@ -86,6 +86,7 @@ async def run(
         for source in sources:
             metrics.init_source(source.name)
             metrics.set_stale_after(source.name, STALE_AFTER_INTERVALS * source.schedule.interval_seconds)
+        qa_exporter = qa.QaExporter(metrics)
         qa_exported: datetime | None = None
         while not stop.is_set():
             try:
@@ -98,7 +99,7 @@ async def run(
             if qa_exported is None or now - qa_exported >= QA_EXPORT_EVERY:
                 qa_exported = now
                 try:
-                    qa.export_latest(metrics)
+                    qa_exporter.export(now)
                 except Exception:
                     log.exception("cannot export the QA report")
             if stop.is_set():

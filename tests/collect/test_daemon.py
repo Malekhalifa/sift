@@ -1,13 +1,14 @@
 import asyncio
 import json
+import os
 import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from prometheus_client import CollectorRegistry
+from prometheus_client import CollectorRegistry, generate_latest
 
 from tp import config
-from tp.collect import cli, daemon
+from tp.collect import cli, daemon, qa
 from tp.collect.daemon import AlreadyRunning, acquire_lock
 from tp.collect.metrics import Metrics
 from tp.collect.source import Daily, Every, Source
@@ -349,3 +350,71 @@ def test_daemon_rereads_qa_at_most_every_five_minutes(tmp_path):
     # ticks at +0s..+330s: the rewrite is only picked up from the 300 s tick on
     assert seen[:10] == [1] * 10
     assert seen[10] == 0
+
+
+def qa_series(metrics):
+    return {(s.labels["source"], s.labels["check"]) for m in metrics.registry.collect() if m.name == "sift_qa_failures" for s in m.samples}
+
+
+def test_vanished_checks_are_cleared_but_the_rest_remain():
+    metrics = Metrics(CollectorRegistry())
+    exporter = qa.QaExporter(metrics)
+    write_report("2026-03-02.json", {"s": {"A": False, "B": False}, "gone": {"C": False}})
+    exporter.export(T0)
+    assert qa_series(metrics) == {("s", "A"), ("s", "B"), ("gone", "C")}
+    write_report("2026-03-03.json", {"s": {"A": True}})
+    exporter.export(T0 + timedelta(minutes=5))
+    assert qa_series(metrics) == {("s", "A")}
+    assert qa_gauge(metrics, "s", "A") == 0
+    text = generate_latest(metrics.registry).decode()
+    assert 'check="B"' not in text and 'source="gone"' not in text
+
+
+def test_a_missing_or_empty_newest_report_keeps_the_previous_series():
+    metrics = Metrics(CollectorRegistry())
+    exporter = qa.QaExporter(metrics)
+    exporter.export(T0)
+    assert qa_series(metrics) == set()
+    write_report("2026-03-02.json", {"s": {"A": False}})
+    exporter.export(T0)
+    write_report("2026-03-03.json", {})
+    exporter.export(T0 + timedelta(minutes=5))
+    assert qa_series(metrics) == {("s", "A")}
+    (config.DATA_DIR / "qa" / "2026-03-03.json").write_text("{not json")
+    exporter.export(T0 + timedelta(minutes=10))
+    assert qa_series(metrics) == {("s", "A")}
+
+
+def test_qa_report_age_grows_when_the_report_is_not_rewritten():
+    write_report("2026-03-02.json", {"s": {"c": True}})
+    path = config.DATA_DIR / "qa" / "2026-03-02.json"
+    os.utime(path, (T0.timestamp(), T0.timestamp()))
+    metrics = Metrics(CollectorRegistry())
+    seen = []
+
+    async def go():
+        stop = asyncio.Event()
+        clock = Clock(T0 + timedelta(minutes=1))
+        n = 0
+
+        async def sleep(s):
+            nonlocal n
+            n += 1
+            seen.append(sample(metrics, "sift_qa_report_age_seconds"))
+            clock.t += timedelta(seconds=s)
+            if n >= 12:
+                stop.set()
+
+        await daemon.run(SETTINGS, [], clock=clock, sleep=sleep, stop=stop, metrics=metrics, state=State(path=config.DATA_DIR / "s.json"))
+
+    asyncio.run(go())
+    assert seen[0] == 60
+    assert seen[9] == 60  # rate limited: not refreshed until the 300 s tick
+    assert seen[10] == 360
+    assert seen[10] > seen[0]
+
+
+def test_qa_report_age_is_unset_without_a_report():
+    metrics = Metrics(CollectorRegistry())
+    run_for(metrics, Clock(), ticks=2)
+    assert sample(metrics, "sift_qa_report_age_seconds") is None

@@ -56,15 +56,14 @@ DEFAULT_INTERVAL_S = 86400
 class _Check:
     ok: bool
     detail: str
-    failures: int = 0
 
 
 def _pass(detail: str = "ok") -> _Check:
     return _Check(True, detail)
 
 
-def _fail(detail: str, failures: int = 1) -> _Check:
-    return _Check(False, detail, failures)
+def _fail(detail: str) -> _Check:
+    return _Check(False, detail)
 
 
 def qa_dir() -> Path:
@@ -128,7 +127,7 @@ def _duplicates(ds, df: pd.DataFrame) -> _Check:
     if absent:
         return _fail(f"missing key columns {absent}")
     n = int(df.duplicated(list(ds.key)).sum())
-    return _fail(f"{n} rows repeat the key {list(ds.key)}", n) if n else _pass("no duplicate keys")
+    return _fail(f"{n} rows repeat the key {list(ds.key)}") if n else _pass("no duplicate keys")
 
 
 def _future(ds, df: pd.DataFrame, now: datetime) -> _Check:
@@ -138,7 +137,7 @@ def _future(ds, df: pd.DataFrame, now: datetime) -> _Check:
     late = ts[ts > pd.Timestamp(now) + FUTURE_SLACK]
     if late.empty:
         return _pass("no future timestamps")
-    return _fail(f"{len(late)} rows with {ds.ts_col} after {(now + FUTURE_SLACK).date()}, latest {late.max().date()}", len(late))
+    return _fail(f"{len(late)} rows with {ds.ts_col} after {(now + FUTURE_SLACK).date()}, latest {late.max().date()}")
 
 
 def _schema(ds, df: pd.DataFrame, previous: dict[str, list[str]], unreadable: bool, advance: bool) -> _Check:
@@ -152,7 +151,7 @@ def _schema(ds, df: pd.DataFrame, previous: dict[str, list[str]], unreadable: bo
     if not removed and not added:
         return _pass(f"{len(cols)} columns unchanged")
     parts = ([f"missing {removed}"] if removed else []) + ([f"new {added}"] if added else [])
-    return _fail("columns changed since the previous QA run: " + ", ".join(parts), len(removed) + len(added))
+    return _fail("columns changed since the previous QA run: " + ", ".join(parts))
 
 
 def _row_count(df: pd.DataFrame, interval_s: int, now: datetime) -> _Check:
@@ -194,7 +193,7 @@ def _merge(parts: dict[str, _Check]) -> _Check:
         return next(iter(parts.values()))
     shown = {n: c for n, c in parts.items() if not c.ok} or parts
     ok = all(c.ok for c in parts.values())
-    return _Check(ok, "; ".join(f"{n}: {c.detail}" for n, c in shown.items()), sum(c.failures for c in parts.values()))
+    return _Check(ok, "; ".join(f"{n}: {c.detail}" for n, c in shown.items()))
 
 
 def _dataset_source(
@@ -221,7 +220,7 @@ def _dataset_source(
             per_check.setdefault(check, {})[dname] = result
     checks = {"freshness": fresh}
     if problems:
-        checks["freshness"] = _Check(False, "; ".join([*problems, *([] if fresh.ok else [fresh.detail])]), len(problems) + (not fresh.ok))
+        checks["freshness"] = _fail("; ".join([*problems, *([] if fresh.ok else [fresh.detail])]))
     checks.update({check: _merge(parts) for check, parts in per_check.items()})
     return checks
 
@@ -257,13 +256,11 @@ def _price_checks(now: datetime, ignore_gaps: set[str], ignore_jumps: set[str], 
     limit = None if full else MAX_DETAIL_ITEMS
     gaps: list[str] = []
     jumps: list[str] = []
-    gap_total = 0
     for symbol in _sample_symbols():
         df = spy if symbol == "SPY" else bars.load_bars(symbol, timeframe="1Day", end=end)
         if df.empty:
             if symbol in core:
                 gaps.append(f"{symbol}: no daily bars")
-                gap_total += 1
             continue
         dates = _dates(df)
         days = pd.DatetimeIndex(dates.unique())
@@ -272,7 +269,6 @@ def _price_checks(now: datetime, ignore_gaps: set[str], ignore_jumps: set[str], 
             missing = missing[missing < days.max()]
         missing = [d.date().isoformat() for d in missing if f"{symbol}:{d.date()}" not in ignore_gaps]
         if missing:
-            gap_total += len(missing)
             gaps.append(f"{symbol} missing {_items(missing, limit)}")
         pos = calendar.get_indexer(dates)
         move = df["close"].pct_change(fill_method=None).to_numpy()
@@ -287,8 +283,8 @@ def _price_checks(now: datetime, ignore_gaps: set[str], ignore_jumps: set[str], 
         cal = _pass(note + "; ".join(gaps) if gaps else "full scan: no holes")
         jmp = _pass(note + _items(jumps, None) if jumps else "full scan: no jumps")
         return cal, jmp
-    cal = _fail("; ".join(gaps), gap_total) if gaps else _pass(f"{len(calendar)} SPY sessions, all sampled series complete")
-    jmp = _fail(_items(jumps), len(jumps)) if jumps else _pass("no one-session move above +100% or below -50%")
+    cal = _fail("; ".join(gaps)) if gaps else _pass(f"{len(calendar)} SPY sessions, all sampled series complete")
+    jmp = _fail(_items(jumps)) if jumps else _pass("no one-session move above +100% or below -50%")
     return cal, jmp
 
 
@@ -336,26 +332,39 @@ def run_qa(
             for check, r in checks.items():
                 if full and check in ("calendar_completeness", "price_jumps"):
                     continue
-                metrics.set_qa(name, check, r.failures)
+                metrics.set_qa(name, check, 0 if r.ok else 1)
     return report
 
 
 _SCHEDULED_REPORT = re.compile(r"\d{4}-\d{2}-\d{2}\.json")
 
 
-def export_latest(metrics: Metrics) -> None:
-    """Publish the newest scheduled report's checks as sift_qa_failures (1 for a failed check, else 0).
+class QaExporter:
+    """Publishes the newest scheduled report to the gauges and clears series that dropped out of it."""
 
-    A missing report is nothing to export; an unreadable one is logged and skipped."""
-    reports = sorted(p for p in qa_dir().glob("*.json") if _SCHEDULED_REPORT.fullmatch(p.name))
-    if not reports:
-        return
-    path = reports[-1]
-    try:
-        sources = json.loads(path.read_text())["sources"]
-        rows = [(n, c, 0 if r["ok"] else 1) for n, src in sources.items() for c, r in src["checks"].items()]
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
-        log.warning("cannot export QA report %s: %s", path, e)
-        return
-    for source, check, failures in rows:
-        metrics.set_qa(source, check, failures)
+    def __init__(self, metrics: Metrics) -> None:
+        self.metrics = metrics
+        self._series: set[tuple[str, str]] = set()
+
+    def export(self, now: datetime) -> None:
+        """sift_qa_failures is 1 for a failed check, else 0; sift_qa_report_age_seconds is now minus the file's mtime.
+
+        A missing, empty or unreadable report changes nothing (it is logged when unreadable)."""
+        reports = sorted(p for p in qa_dir().glob("*.json") if _SCHEDULED_REPORT.fullmatch(p.name))
+        if not reports:
+            return
+        path = reports[-1]
+        try:
+            self.metrics.set_qa_report_age(max(now.timestamp() - path.stat().st_mtime, 0.0))
+            sources = json.loads(path.read_text())["sources"]
+            rows = {(n, c): 0 if r["ok"] else 1 for n, src in sources.items() for c, r in src["checks"].items()}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            log.warning("cannot export QA report %s: %s", path, e)
+            return
+        if not rows:
+            return
+        for (source, check), failures in rows.items():
+            self.metrics.set_qa(source, check, failures)
+        for source, check in self._series - rows.keys():
+            self.metrics.clear_qa(source, check)
+        self._series = set(rows)

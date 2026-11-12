@@ -476,12 +476,12 @@ def test_failed_report_write_leaves_no_partial_file(clean, monkeypatch):
     assert not list((config.DATA_DIR / "qa").glob("*"))
 
 
-def test_failures_are_exported_per_source_and_check(clean):
+def test_failures_are_exported_as_zero_or_one_per_source_and_check(clean):
     put("form4", form4_rows(10, today=10).pipe(lambda d: pd.concat([d, d.iloc[:3]], ignore_index=True)))
     registry = CollectorRegistry()
     qa.run_qa(NOW, fresh_state(), SETTINGS, metrics=Metrics(registry))
     get = lambda s, c: registry.get_sample_value("sift_qa_failures", {"source": s, "check": c})  # noqa: E731
-    assert get("sec_form4", "duplicates") == 3
+    assert get("sec_form4", "duplicates") == 1  # three duplicate rows, one failed check
     assert get("sec_form4", "freshness") == 0
     assert get("alpaca_bars", "price_jumps") == 0
 

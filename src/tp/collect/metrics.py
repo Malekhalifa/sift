@@ -27,6 +27,7 @@ class Metrics:
             "sift_source_stale_after_seconds", "Age beyond which a source counts as stale", ["source"], registry=r
         )
         self._qa = Gauge("sift_qa_failures", "Rows failing a QA check", ["source", "check"], registry=r)
+        self._qa_age: Gauge | None = None  # created on first use: an unlabelled gauge would export 0 (looks fresh)
         self._disk = Gauge("sift_disk_free_bytes", "Free bytes on the data volume", registry=r)
         self._apify = Gauge("sift_apify_spend_usd_month", "Apify spend this month in USD", registry=r)
         self._httpd = None
@@ -53,6 +54,22 @@ class Metrics:
 
     def set_qa(self, source: str, check: str, failures: int) -> None:
         self._qa.labels(source, check).set(failures)
+
+    def clear_qa(self, source: str, check: str) -> None:
+        """Drop one QA series; a series that was never set is not an error."""
+        try:
+            self._qa.remove(source, check)
+        except KeyError:
+            pass
+
+    def set_qa_report_age(self, seconds: float) -> None:
+        """Age of the newest scheduled QA report; the series does not exist until a report has been seen."""
+        if self._qa_age is None:
+            self._qa_age = Gauge(
+                "sift_qa_report_age_seconds", "Seconds since the newest scheduled QA report was written",
+                registry=self.registry,
+            )
+        self._qa_age.set(seconds)
 
     def set_disk_free(self, bytes: int) -> None:
         self._disk.set(bytes)
