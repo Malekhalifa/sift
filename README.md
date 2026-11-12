@@ -64,7 +64,7 @@ after costs, and more than just holding the market?
 | 12 | High-volume continuation | The highest volume in weeks starts an upward drift | +0.100R ±0.019 | ⚠️ 5 of 7 checks, then **−0.039R** after the market |
 | – | 200-day trend filter on SPY | Holding the market only above its 200-day average is safer | 8.8% a year vs 12.8% | ⚖️ Worst drop −22% instead of −32%, at a price |
 
-The last row is a side question, not a trading idea. Full plain-language explanations are in the [report](docs/findings.md#2-the-twelve-ideas-in-plain-words).
+The last row is a side question, not a trading idea. Full plain-language explanations are in the [report](docs/findings.md#2-the-first-twelve-ideas-in-plain-words).
 
 ### Five more tests on new free data (M14 to M18)
 
