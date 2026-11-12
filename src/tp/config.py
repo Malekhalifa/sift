@@ -72,3 +72,13 @@ def confirm_symbols() -> list[str]:
         return []
     with open(path, "rb") as f:
         return list(tomllib.load(f)["universe"]["confirm"])
+
+
+def sf_symbols() -> list[str]:
+    """Survivorship-free universe (scripts/select_universe.py --include-inactive --no-exclude --n 1000 --key sf): ranks 1-1000
+    by Q1-2016 dollar volume across names listed then, including those delisted since. Daily bars only."""
+    path = ROOT / "config" / "universe_sf.toml"
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        return list(tomllib.load(f)["universe"]["sf"])
