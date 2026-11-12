@@ -1,0 +1,338 @@
+"""FINRA sources: the consolidated daily short-sale volume files (Reg SHO, CNMS) and the bi-monthly short-interest files.
+
+cdn.finra.org answers 403 (not 404) for a file that does not exist, so a 403 is never read as rate limiting here; only
+429 is. Days with no file (weekends, holidays) are remembered in small text files so they are not asked for again.
+`fetch_day` and `merge_shortvol` are shared with scripts/fetch_finra.py.
+"""
+from __future__ import annotations
+
+import io
+import logging
+import os
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import httpx
+import numpy as np
+import pandas as pd
+
+from tp import config
+from tp.collect import datasets
+from tp.collect.datasets import Dataset
+from tp.collect.source import (
+    DEFAULT_TZ,
+    RateLimited,
+    RunContext,
+    Source,
+    SourceError,
+    parse_schedule,
+)
+
+log = logging.getLogger(__name__)
+
+URL = "https://cdn.finra.org/equity/regsho/daily/CNMSshvol{day}.txt"
+SHORT_INTEREST_URL = "https://cdn.finra.org/equity/otcmarket/biweekly/shrt{day}.csv"
+FIRST = date(2018, 8, 1)  # the first consolidated daily file
+FIRST_SETTLEMENT = date(2017, 12, 29)  # the first biweekly short-interest file the recorder keeps
+MIN_AGE_BUSINESS_DAYS = 10  # a short-interest file is requested only this long after its settlement date
+HOLIDAY_FALLBACK_DAYS = 4  # a settlement date on a market holiday is filed under one of the previous business days
+RETRY_AFTER_S = 600
+RETRIES = 4
+COLUMNS = {"Date": "date", "Symbol": "symbol", "ShortVolume": "short", "ShortExemptVolume": "exempt", "TotalVolume": "total"}
+VOLUME_COLUMNS = ["short", "exempt", "total"]
+KEY = ["date", "symbol"]
+
+
+class FinraUnavailable(RuntimeError):
+    """FINRA gave no usable answer after the retries; `status` is the last HTTP status (None for transport errors)."""
+
+    def __init__(self, message: str, status: int | None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _download(http: httpx.Client, url: str, label: str) -> str | None:
+    """The body of `url`, or None for a 403/404 (the CDN's answer for an absent file). Transport errors and other statuses
+    are retried; a 429 stops at once."""
+    status: int | None = None
+    for _ in range(RETRIES):
+        try:
+            r = http.get(url)
+        except httpx.TransportError:
+            status = None
+            continue
+        status = r.status_code
+        if status in (403, 404):
+            return None
+        if status == 200:
+            return r.text
+        if status == 429:
+            break
+    raise FinraUnavailable(f"FINRA {label}: no usable response after retries (last status {status})", status)
+
+
+def fetch_day(http: httpx.Client, day: date, symbols: set[str]) -> pd.DataFrame | None:
+    """Rows for the universe on `day`, or None when FINRA has no file for that date."""
+    text = _download(http, URL.format(day=day.strftime("%Y%m%d")), str(day))
+    if text is None:
+        return None
+    df = pd.read_csv(io.StringIO(text), sep="|", dtype={"Date": str, "Symbol": str})
+    df = df[df["Symbol"].isin(symbols)].rename(columns=COLUMNS)
+    df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
+    return df[["date", "symbol", "short", "exempt", "total"]].reset_index(drop=True)
+
+
+def merge_shortvol(prior: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    """`fresh` rows added to the stored file; a (date, symbol) already stored keeps its row, so the recorder's `ingested_at`
+    and its survivorship-free symbols survive a rebuild from the daily cache."""
+    out = pd.concat([prior, fresh], ignore_index=True).drop_duplicates(KEY, keep="first")
+    return out.sort_values("date", kind="stable").reset_index(drop=True)
+
+
+def universe_symbols() -> set[str]:
+    """Traded, events, confirm and survivorship-free symbols plus SPY and QQQ."""
+    traded = config.load_universe()["universe"]["traded"]
+    return {*traded, *config.events_symbols(), *config.confirm_symbols(), *config.sf_symbols(), "SPY", "QQQ"}
+
+
+def _et_date(now: datetime) -> date:
+    return now.astimezone(ZoneInfo(DEFAULT_TZ)).date()
+
+
+def _weekday_on_or_before(d: date) -> date:
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _weekdays(first: date, last: date) -> list[date]:
+    return [d for i in range((last - first).days + 1) if (d := first + timedelta(days=i)).weekday() < 5]
+
+
+def settlement_dates(first: date, last: date) -> list[date]:
+    """Short-interest settlement dates in [first, last]: the 15th and the last business day of each month, each moved back
+    to the previous weekday when it falls on a weekend. Market holidays are handled when the files are fetched."""
+    out: set[date] = set()
+    for period in pd.period_range(first, last, freq="M"):
+        for nominal in (date(period.year, period.month, 15), period.end_time.date()):
+            d = _weekday_on_or_before(nominal)
+            if first <= d <= last:
+                out.add(d)
+    return sorted(out)
+
+
+def _candidates(settlement: date) -> list[date]:
+    """The settlement date and the previous business days FINRA may have dated its file with when it was a holiday."""
+    out = [settlement]
+    while len(out) < HOLIDAY_FALLBACK_DAYS:
+        out.append(_weekday_on_or_before(out[-1] - timedelta(days=1)))
+    return out
+
+
+def read_days(path: Path) -> set[str]:
+    try:
+        return set(path.read_text().split())
+    except OSError:
+        return set()
+
+
+def write_days(path: Path, days: set[str]) -> None:
+    """Replace the list via a pid-suffixed temp file, in the format scripts/fetch_finra.py has always written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text("\n".join(sorted(days)))
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _stored_column(ds: Dataset, column: str) -> pd.Series | None:
+    if not ds.path.exists():
+        return None
+    try:
+        return pd.read_parquet(ds.path, columns=[column])[column]
+    except Exception as e:
+        raise SourceError(f"cannot read {ds.path}: {e}") from e
+
+
+def _default_http() -> httpx.Client:
+    return httpx.Client(headers={"User-Agent": "sift-research"}, timeout=60.0, follow_redirects=True)
+
+
+def _failure(e: Exception, what: str) -> SourceError:
+    if isinstance(e, FinraUnavailable) and e.status == 429:
+        return RateLimited(str(e), retry_after_s=RETRY_AFTER_S)
+    return SourceError(f"FINRA {what} failed: {e}")
+
+
+class _FinraSource(Source):
+    """Shared run: whatever was read before a failure is stored, then the failure is raised."""
+
+    rate_group = "finra"
+
+    def __init__(self, schedule: str, lag_minutes: int, http_factory: Callable[[], httpx.Client] | None) -> None:
+        self.schedule = parse_schedule(schedule)
+        self.lag = timedelta(minutes=lag_minutes)
+        self._http_factory = http_factory or _default_http
+
+    def _gather(self, ctx: RunContext) -> tuple[pd.DataFrame, SourceError | None]:
+        raise NotImplementedError
+
+    def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
+        frame, error = self._gather(ctx)
+        if error:
+            raise error
+        return {self.datasets[0]: frame}
+
+    def run(self, ctx: RunContext) -> int:
+        frame, error = self._gather(ctx)
+        added = ctx.writer(self.datasets[0], frame) if not frame.empty else 0
+        if error:
+            raise error
+        return added
+
+
+def _no_file_path() -> Path:
+    return config.DATA_DIR / "finra" / "no_file.txt"
+
+
+def _empty_shortvol() -> pd.DataFrame:
+    out = pd.DataFrame({"date": pd.Series(dtype="datetime64[us]"), "symbol": pd.Series(dtype="str")})
+    for col in VOLUME_COLUMNS:
+        out[col] = pd.Series(dtype="float64")
+    return out
+
+
+class FinraShortVolume(_FinraSource):
+    """Daily short volume for the universe. Fetches the weekdays after the stored maximum date up to yesterday (ET), so a
+    file is never asked for before FINRA has had a day to post it, and remembers the days that have no file."""
+
+    name = "finra_shortvol"
+
+    def __init__(
+        self,
+        schedule: str = "daily 18:30 America/New_York",
+        lag_minutes: int = 0,
+        http_factory: Callable[[], httpx.Client] | None = None,
+    ) -> None:
+        super().__init__(schedule, lag_minutes, http_factory)
+        self.datasets = (datasets.dataset("finra_shortvol"),)
+
+    def _days(self, ctx: RunContext) -> list[date]:
+        stored = _stored_column(self.datasets[0], "date")
+        start = FIRST if stored is None or stored.empty else max(FIRST, stored.max().date() + timedelta(days=1))
+        known = read_days(_no_file_path())
+        return [d for d in _weekdays(start, _et_date(ctx.now) - timedelta(days=1)) if f"{d:%Y%m%d}" not in known]
+
+    def _gather(self, ctx: RunContext) -> tuple[pd.DataFrame, SourceError | None]:
+        days = self._days(ctx)
+        if not days:
+            return _empty_shortvol(), None
+        symbols = universe_symbols()
+        parts: list[pd.DataFrame] = []
+        new_gaps: set[str] = set()
+        error: SourceError | None = None
+        http = self._http_factory()
+        try:
+            for day in days:
+                df = fetch_day(http, day, symbols)
+                if df is None:
+                    new_gaps.add(f"{day:%Y%m%d}")
+                else:
+                    parts.append(df)
+        except (FinraUnavailable, httpx.HTTPError, ValueError, KeyError) as e:
+            error = _failure(e, "short volume download")
+        finally:
+            if isinstance(http, httpx.Client):
+                http.close()
+            if new_gaps:
+                write_days(_no_file_path(), read_days(_no_file_path()) | new_gaps)
+        log.info("finra_shortvol: %d days asked for, %d read, %d without a file", len(days), len(parts), len(new_gaps))
+        if not parts:
+            return _empty_shortvol(), error
+        frame = pd.concat(parts, ignore_index=True)
+        frame["date"] = frame["date"].astype("datetime64[us]")
+        frame[VOLUME_COLUMNS] = frame[VOLUME_COLUMNS].astype("float64")
+        return frame, error
+
+
+def _short_interest_no_file_path() -> Path:
+    return config.DATA_DIR / "finra" / "short_interest_no_file.txt"
+
+
+def fetch_short_interest(http: httpx.Client, day: date, symbols: set[str]) -> pd.DataFrame | None:
+    """The universe rows of the short-interest file dated `day`, or None when FINRA has no file for it. `symbol` is the
+    file's symbolCode; every other column is kept and `settlement_date` is added."""
+    text = _download(http, SHORT_INTEREST_URL.format(day=day.strftime("%Y%m%d")), f"short interest {day}")
+    if text is None:
+        return None
+    df = pd.read_csv(io.StringIO(text), sep="|", dtype={"symbolCode": str})
+    df = df[df["symbolCode"].isin(symbols)].rename(columns={"symbolCode": "symbol"}).reset_index(drop=True)
+    df.insert(0, "settlement_date", pd.Series(pd.Timestamp(day), index=df.index, dtype="datetime64[us]"))
+    return df
+
+
+class FinraShortInterest(_FinraSource):
+    """Biweekly short interest. A settlement date is requested once it is MIN_AGE_BUSINESS_DAYS business days old; a file
+    FINRA does not have for such a date is remembered and not retried. Each file is cut to the universe as it is read, and
+    everything read is stored in one write."""
+
+    name = "finra_short_interest"
+
+    def __init__(
+        self,
+        schedule: str = "daily 09:00 America/New_York",
+        lag_minutes: int = 0,
+        http_factory: Callable[[], httpx.Client] | None = None,
+    ) -> None:
+        super().__init__(schedule, lag_minutes, http_factory)
+        self.datasets = (datasets.dataset("finra_short_interest"),)
+
+    def _due(self, ctx: RunContext) -> list[date]:
+        today = _et_date(ctx.now)
+        stored = _stored_column(self.datasets[0], "settlement_date")
+        have = set() if stored is None else {t.date() for t in pd.to_datetime(stored).dropna().unique()}
+        due = [
+            d for d in settlement_dates(FIRST_SETTLEMENT, today)
+            if int(np.busday_count(d, today)) >= MIN_AGE_BUSINESS_DAYS
+        ]
+        return [d for d in due if not have.intersection(_candidates(d))]
+
+    def _gather(self, ctx: RunContext) -> tuple[pd.DataFrame, SourceError | None]:
+        due = self._due(ctx)
+        if not due:
+            return pd.DataFrame(), None
+        symbols = universe_symbols()
+        known = read_days(_short_interest_no_file_path())
+        absent: set[str] = set()
+        parts: list[pd.DataFrame] = []
+        error: SourceError | None = None
+        http = self._http_factory()
+        try:
+            for settlement in due:
+                tried = [d for d in _candidates(settlement) if f"{d:%Y%m%d}" not in known]
+                for day in tried:
+                    df = fetch_short_interest(http, day, symbols)
+                    if df is not None:
+                        parts.append(df)
+                        break
+                    absent.add(f"{day:%Y%m%d}")
+                else:
+                    if tried:
+                        log.warning(
+                            "finra_short_interest: no file for %s (tried %s); not retrying",
+                            settlement, ", ".join(f"{d:%Y%m%d}" for d in tried),
+                        )
+        except (FinraUnavailable, httpx.HTTPError, ValueError, KeyError) as e:
+            error = _failure(e, "short interest download")
+        finally:
+            if isinstance(http, httpx.Client):
+                http.close()
+            if absent:
+                write_days(_short_interest_no_file_path(), known | absent)
+        log.info("finra_short_interest: %d settlement dates due, %d files read", len(due), len(parts))
+        return (pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()), error

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from tp.collect.source import Source
 from tp.collect.sources.alpaca_bars import AlpacaBars
+from tp.collect.sources.finra import FinraShortInterest, FinraShortVolume
 from tp.collect.sources.sec import SecFilings, SecForm4, SecXbrlShares
 
 
@@ -24,4 +25,8 @@ def build_sources(settings: dict) -> list[Source]:
     sources.append(SecForm4(cfg["schedule"], cfg["lag_minutes"]))
     cfg = source_settings(settings, "sec_xbrl_shares")
     sources.append(SecXbrlShares(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "finra_shortvol")
+    sources.append(FinraShortVolume(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "finra_short_interest")
+    sources.append(FinraShortInterest(cfg["schedule"], cfg["lag_minutes"]))
     return sources

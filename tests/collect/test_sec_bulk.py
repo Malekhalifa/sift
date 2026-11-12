@@ -21,6 +21,8 @@ SETTINGS = {"sources": {
     "sec_filings": {"schedule": "daily 07:30 America/New_York", "lag_minutes": 0},
     "sec_form4": {"schedule": "daily 08:00 America/New_York", "lag_minutes": 0},
     "sec_xbrl_shares": {"schedule": "weekly sun 09:00 America/New_York", "lag_minutes": 0},
+    "finra_shortvol": {"schedule": "daily 18:30 America/New_York", "lag_minutes": 0},
+    "finra_short_interest": {"schedule": "daily 09:00 America/New_York", "lag_minutes": 0},
 }}
 
 
