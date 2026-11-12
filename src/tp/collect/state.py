@@ -92,10 +92,11 @@ class State:
         })
 
     def _update(self, name: str, fields: dict) -> None:
+        """Merge into memory first so backoff holds even when the save fails; the save error propagates."""
         with self._lock:
             merged = {**self._data.get(name, {}), **fields}
-            self._save({**self._data, name: merged})
             self._data[name] = merged
+            self._save(self._data)
 
     def _save(self, data: dict[str, dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

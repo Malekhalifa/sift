@@ -103,7 +103,10 @@ class Scheduler:
             self._record_failure(source, e, error)
             return RunResult(source.name, False, 0, seconds, error)
         seconds = time.perf_counter() - t0
-        self.state.record_success(source.name, self.clock(), rows)
+        try:
+            self.state.record_success(source.name, self.clock(), rows)
+        except OSError:
+            log.exception("could not save state after source %s succeeded", source.name)
         return RunResult(source.name, True, rows, seconds, None)
 
     def _record_failure(self, source: Source, exc: Exception, error: str) -> None:
@@ -112,7 +115,10 @@ class Scheduler:
         if isinstance(exc, RateLimited):
             retry_after = min(max(exc.retry_after_s, 0), BACKOFF_CAP_S)
         log.warning("source %s failed: %s", source.name, error)
-        self.state.record_failure(source.name, now, error, retry_after)
+        try:
+            self.state.record_failure(source.name, now, error, retry_after)
+        except OSError:
+            log.exception("could not save state after source %s failed", source.name)
         if retry_after is not None:
             window_end = self.state.backoff_until(source.name)
             self._group_until[source.rate_group] = max(window_end, self._group_until.get(source.rate_group, window_end))

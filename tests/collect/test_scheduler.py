@@ -327,3 +327,34 @@ def test_ctx_carries_now_settings_and_writer(tmp_path):
     assert seen["ctx"].now == clock.t
     assert seen["ctx"].settings == {"k": 1}
     assert seen["ctx"].writer is writer
+
+
+def _unsaveable(state, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(state, "_save", boom)
+
+
+def test_unsaveable_state_failing_source_runs_once_then_backs_off(tmp_path, monkeypatch):
+    a = Fake("a", raises=SourceError("down"))
+    sched, state, clock = make(tmp_path, [a])
+    _unsaveable(state, monkeypatch)
+    first = tick(sched)
+    assert [(r.source, r.ok, r.error) for r in first] == [("a", False, "SourceError: down")]
+    assert tick(sched) == []
+    clock.advance(seconds=30)
+    assert tick(sched) == []
+    assert a.calls == 1
+    clock.advance(seconds=31)
+    assert len(tick(sched)) == 1 and a.calls == 2
+
+
+def test_unsaveable_state_successful_source_is_not_rerun(tmp_path, monkeypatch):
+    a = Fake("a", rows=4)
+    sched, state, clock = make(tmp_path, [a])
+    _unsaveable(state, monkeypatch)
+    first = tick(sched)
+    assert [(r.ok, r.rows) for r in first] == [(True, 4)]
+    assert tick(sched) == []
+    assert a.calls == 1

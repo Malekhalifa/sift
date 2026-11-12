@@ -176,6 +176,21 @@ def test_state_roundtrip_and_atomic(tmp_path, monkeypatch):
     assert not list(path.parent.glob("*.tmp"))
 
 
+def test_state_failed_save_still_updates_memory(tmp_path, monkeypatch):
+    st = State.load(tmp_path / "s.json")
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError):
+        st.record_failure("x", NOW, "boom")
+    assert st.failures("x") == 1 and st.backoff_until("x") > NOW
+    with pytest.raises(OSError):
+        st.record_success("x", NOW, 3)
+    assert st.last_success("x") == NOW and st.failures("x") == 0
+
+
 def test_state_failure_backoff_grows_and_success_resets(tmp_path):
     st = State.load(tmp_path / "s.json")
     waits = []
