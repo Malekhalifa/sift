@@ -1,0 +1,92 @@
+# Settings for the tp.collect recorder daemon. Schedule text is parsed by tp.collect.source.parse_schedule
+# (timezone defaults to America/New_York when omitted).
+
+[metrics]
+port = 9120
+
+# Acknowledged price events, "SYMBOL:YYYY-MM-DD": a real split-less move or a known hole that QA should stop flagging.
+[qa]
+ignore_jumps = []
+ignore_gaps = []
+
+[apify]
+monthly_cap_usd = 4.0
+daily_run_cap_usd = 0.05
+
+[sources.alpaca_bars]
+schedule = "daily 21:00 America/New_York"
+lag_minutes = 20
+
+[sources.sec_filings]
+schedule = "daily 07:30 America/New_York"
+lag_minutes = 0
+
+[sources.sec_form4]
+schedule = "daily 08:00 America/New_York"
+lag_minutes = 0
+
+[sources.sec_xbrl_shares]
+schedule = "weekly sun 09:00 America/New_York"
+lag_minutes = 0
+
+[sources.finra_shortvol]
+schedule = "daily 18:30 America/New_York"
+lag_minutes = 0
+
+[sources.finra_short_interest]
+schedule = "daily 09:00 America/New_York"
+lag_minutes = 0
+
+[sources.dod_awards]
+schedule = "weekly mon 06:00 America/New_York"
+lag_minutes = 0
+
+[sources.trump_posts]
+schedule = "daily 07:00 America/New_York"
+lag_minutes = 0
+
+[sources.sp500_changes]
+schedule = "weekly sun 10:00 America/New_York"
+lag_minutes = 0
+
+[sources.wikipedia_pageviews]
+schedule = "daily 06:30 UTC"
+lag_minutes = 0
+# Off until config/wikipedia_articles.toml has been reviewed (scripts/build_wikipedia_map.py proposes candidates).
+enabled = false
+
+# Off until the user confirms the actor and the spend. One run a day, at most max_items results, each run capped at
+# [apify] daily_run_cap_usd (maxTotalChargeUsd). The actor id is read here and nowhere else; `fields` maps our column
+# names to the actor's output fields; ts_field is its disclosure timestamp; a row's source_id is the actor's id_field when
+# set, else a hash of the id_fields columns. The input table is sent as the actor input (max_items goes in item_limit_field).
+# Preferred actor (docs/research/data-sources.md, Apify): smartmoney-data/congress-stock-trades-tracker, $0.005 per trade,
+# 10 trades fit the $0.05 daily cap. Check its input schema (lookback field names) before enabling.
+[sources.congress_trades]
+schedule = "daily 08:30 America/New_York"
+lag_minutes = 0
+enabled = false
+actor = "smartmoney-data/congress-stock-trades-tracker"
+max_items = 10
+item_limit_field = "maxItems"
+ts_field = "disclosureDate"
+id_field = ""
+id_fields = ["filing_url", "politician", "ticker", "transaction_type", "traded_date", "amount_range", "owner", "asset_name"]
+
+[sources.congress_trades.input]
+lookbackDays = 7
+
+[sources.congress_trades.fields]
+politician = "politician"
+chamber = "chamber"
+ticker = "ticker"
+transaction_type = "transactionType"
+amount_range = "amountRange"
+amount_min = "amountMin"
+amount_max = "amountMax"
+traded_date = "transactionDate"
+disclosure_date = "disclosureDate"
+owner = "owner"
+asset_name = "assetName"
+filing_url = "filingUrl"
+party = "party"
+state = "state"

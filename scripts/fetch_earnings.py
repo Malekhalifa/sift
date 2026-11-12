@@ -14,10 +14,14 @@ import sys
 import pandas as pd
 
 from tp import config, events
+from tp.collect import daemon, datasets, store
+from tp.collect.sources import sec
 from tp.edgar import EdgarBlocked, EdgarClient
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--universe", choices=["events", "confirm"], default="events")
     args = ap.parse_args()
@@ -44,11 +48,8 @@ def main() -> int:
         print(f"SEC rate limit: {e}. Everything fetched so far is cached; rerun in about ten minutes.", file=sys.stderr)
         return 2
     out = pd.concat(frames, ignore_index=True)
-    if events.events_path().exists():  # keep every other universe's rows; replace only the symbols fetched now
-        old = pd.read_parquet(events.events_path())
-        out = pd.concat([old[~old["symbol"].isin(out["symbol"].unique())], out], ignore_index=True)
-    events.events_path().parent.mkdir(parents=True, exist_ok=True)
-    out.to_parquet(events.events_path(), index=False)
+    out = store.merge_rebuilt(datasets.dataset("earnings"), out)  # keeps every stored row and its ingested_at
+    sec.atomic_parquet(out, events.events_path())
     per = out.groupby("symbol").size()
     print(f"{len(out):,} earnings filings for {out['symbol'].nunique()} symbols ({per.min()} to {per.max()} each, median {int(per.median())})")
     if missing:

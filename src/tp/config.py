@@ -31,6 +31,16 @@ class Settings:
         return cls(alpaca_key_id=key_id, alpaca_secret=secret)
 
 
+def apify_key() -> str:
+    """The Apify API key from APIFY_API_KEY (or `.env`), read only when asked so the other code paths never need it.
+    ValueError, without the key, when it is not set."""
+    load_dotenv(ROOT / ".env")
+    key = os.environ.get("APIFY_API_KEY", "").strip()
+    if not key:
+        raise ValueError("APIFY_API_KEY is not set; add it to .env (see .env.example)")
+    return key
+
+
 def load_universe() -> dict:
     with open(ROOT / "config" / "universe.toml", "rb") as f:
         return tomllib.load(f)
@@ -72,3 +82,13 @@ def confirm_symbols() -> list[str]:
         return []
     with open(path, "rb") as f:
         return list(tomllib.load(f)["universe"]["confirm"])
+
+
+def sf_symbols() -> list[str]:
+    """Survivorship-free universe (scripts/select_universe.py --include-inactive --no-exclude --n 1000 --key sf): ranks 1-1000
+    by Q1-2016 dollar volume across names listed then, including those delisted since. Daily bars only."""
+    path = ROOT / "config" / "universe_sf.toml"
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        return list(tomllib.load(f)["universe"]["sf"])

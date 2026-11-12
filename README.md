@@ -191,6 +191,12 @@ tests/           the test suite
 ops/launchd/     job templates (the nightly sync is parked, the paper loop is not installed)
 ```
 
+## Recorder
+
+`tp.collect` is a long-running recorder that keeps the price and event datasets fresh (SEC filings, short volume, and
+others) and runs daily data-quality checks. It runs as two launchd agents with Prometheus alerts; install, status, the
+alert guide and the acceptance checklist are in [docs/recorder-runbook.md](docs/recorder-runbook.md).
+
 ## Reference
 
 Details on the data layer, the backtest conventions and the paper-trading plumbing.

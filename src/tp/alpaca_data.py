@@ -131,8 +131,9 @@ class AlpacaClient:
                 return
             params["page_token"] = token
 
-    def assets(self) -> list[dict]:
-        return self._get(f"{PAPER_URL}/v2/assets", {"status": "active", "asset_class": "us_equity"})
+    def assets(self, status: str = "active") -> list[dict]:
+        """US equity assets. status 'inactive' lists delisted names, whose bars the free tier still serves."""
+        return self._get(f"{PAPER_URL}/v2/assets", {"status": status, "asset_class": "us_equity"})
 
     def splits(self, symbols: Sequence[str], start: date, end: date) -> Iterator[dict]:
         """Yield forward/reverse split records (symbol, ex_date, new_rate, old_rate)."""

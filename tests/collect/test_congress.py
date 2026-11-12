@@ -1,0 +1,1379 @@
+import json
+import logging
+import os
+import traceback
+from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs
+from zoneinfo import ZoneInfo
+
+import httpx
+import pandas as pd
+import pytest
+
+from tp import config
+from tp.collect import datasets, store
+from tp.collect.source import RateLimited, RunContext, SourceError
+from tp.collect.sources import build_sources, source_settings
+from tp.collect.sources import congress as cg
+from tp.collect.sources.congress import CongressTrades, SpendLedger
+
+KEY = "apify_api_FAKEKEY0123456789abcdefXYZ"
+ACTOR = "someone/congress-feed"
+NOW = datetime(2026, 11, 12, 13, 30, tzinfo=UTC)
+FIELDS = {
+    "politician": "politician", "chamber": "chamber", "ticker": "ticker", "transaction_type": "transactionType",
+    "amount_range": "amountRange", "amount_min": "amountMin", "amount_max": "amountMax",
+    "traded_date": "transactionDate", "disclosure_date": "disclosureDate", "owner": "owner",
+    "asset_name": "assetName", "filing_url": "filingUrl",
+}
+CONGRESS = {
+    "schedule": "daily 08:30 America/New_York", "lag_minutes": 0, "actor": ACTOR, "max_items": 10,
+    "item_limit_field": "maxItems", "ts_field": "disclosureDate", "id_field": "",
+    "id_fields": ["filing_url", "politician", "ticker", "transaction_type", "traded_date", "amount_range", "owner",
+                  "asset_name"],
+    "input": {"lookbackDays": 7}, "fields": FIELDS,
+}
+SETTINGS = {
+    "apify": {"monthly_cap_usd": 4.0, "daily_run_cap_usd": 0.05},
+    "sources": {
+        "alpaca_bars": {"schedule": "daily 21:00 America/New_York", "lag_minutes": 20},
+        "sec_filings": {"schedule": "daily 07:30 America/New_York", "lag_minutes": 0},
+        "sec_form4": {"schedule": "daily 08:00 America/New_York", "lag_minutes": 0},
+        "sec_xbrl_shares": {"schedule": "weekly sun 09:00 America/New_York", "lag_minutes": 0},
+        "finra_shortvol": {"schedule": "daily 18:30 America/New_York", "lag_minutes": 0},
+        "finra_short_interest": {"schedule": "daily 09:00 America/New_York", "lag_minutes": 0},
+        "dod_awards": {"schedule": "weekly mon 06:00 America/New_York", "lag_minutes": 0},
+        "trump_posts": {"schedule": "daily 07:00 America/New_York", "lag_minutes": 0},
+        "sp500_changes": {"schedule": "weekly sun 10:00 America/New_York", "lag_minutes": 0},
+        "wikipedia_pageviews": {"schedule": "daily 06:30 UTC", "lag_minutes": 0},
+        "congress_trades": CONGRESS,
+    },
+}
+
+
+def trade(i: int = 0, **over) -> dict:
+    row = {
+        "chamber": "Senate", "politician": f"Sen Number{i}", "ticker": "MSFT", "transactionType": "Sale (Partial)",
+        "transactionDate": "2026-10-15", "disclosureDate": "2026-11-02", "amountRange": "$1,001 - $15,000",
+        "amountMin": 1001, "amountMax": 15000, "owner": "Spouse", "assetName": "Microsoft Corporation",
+        "filingUrl": f"https://efdsearch.senate.gov/search/view/ptr/doc{i}/", "committees": ["x"],
+    }
+    return row | over
+
+
+def run_object(status="SUCCEEDED", cost: object = 0.0312, rid="run1", **over) -> dict:
+    data = {"id": rid, "status": status, "defaultDatasetId": "ds1", "usageTotalUsd": cost}
+    if cost is None:
+        del data["usageTotalUsd"]
+    return {"data": data | over}
+
+
+def pricing(*infos: dict) -> dict:
+    return {"data": {"name": "congress-feed", "pricingInfos": list(infos)}}
+
+
+PER_EVENT = {"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {
+    "trade": {"eventTitle": "A trade", "eventPriceUsd": 0.005}}}}
+
+
+LIMITS = {"data": {"current": {"monthlyUsageUsd": 0.0}, "limits": {"maxMonthlyUsageUsd": 5.0}}}
+
+
+class FakeApify:
+    """Plays the parts of the Apify REST API that the source uses and records every request it receives."""
+
+    def __init__(self, items=None, run=None, polls=None, details=None, start_status=201, limits=None,
+                 abort_status="ABORTED", poll_failures=0):
+        self.items = [trade(0), trade(1)] if items is None else items
+        self.run = run or run_object()
+        self.polls = polls or []  # statuses answered before the final run object
+        self.details = details if details is not None else pricing(PER_EVENT)
+        self.start_status = start_status
+        self.limits = limits if limits is not None else LIMITS
+        self.abort_status = abort_status
+        self.poll_failures = poll_failures
+        self.requests: list[httpx.Request] = []
+        self.abort_cost = 0.01
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        path = request.url.path
+        if request.method == "GET" and path == "/v2/users/me/limits":
+            return self._reply(self.limits)
+        if request.method == "GET" and path.startswith("/v2/acts/") and not path.endswith("/runs"):
+            return self._reply(self.details)
+        if request.method == "POST" and path.endswith("/runs"):
+            if self.start_status != 201:
+                return self._reply({"error": {"message": f"nope {KEY}"}}, self.start_status)
+            return self._reply(run_object("RUNNING", None, rid=self.run["data"]["id"]), 201)
+        if request.method == "POST" and path.endswith("/abort"):
+            self.polls.clear()
+            self.run = run_object(self.abort_status, self.abort_cost, rid=self.run["data"]["id"])
+            return self._reply(self.run)
+        if request.method == "GET" and path.startswith("/v2/actor-runs/"):
+            if self.poll_failures:
+                self.poll_failures -= 1
+                return self._reply({"error": "blip"}, 503)
+            if self.polls:
+                return self._reply(run_object(self.polls.pop(0), None, rid=self.run["data"]["id"]))
+            return self._reply(self.run)
+        if request.method == "GET" and path.startswith("/v2/datasets/"):
+            return self._reply(self.items)
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    @staticmethod
+    def _reply(body, status=200) -> httpx.Response:
+        return httpx.Response(status, json=body)
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(self.handler))
+
+    def calls(self, method: str, suffix: str = "") -> list[httpx.Request]:
+        return [r for r in self.requests if r.method == method and r.url.path.endswith(suffix)]
+
+    def starts(self) -> list[httpx.Request]:
+        return self.calls("POST", "/runs")
+
+    def fail_on(self, match, exc: Exception) -> None:
+        """Make every request for which `match(request)` is true raise `exc` instead of being answered."""
+        base = self.handler
+
+        def hostile(request: httpx.Request) -> httpx.Response:
+            if match(request):
+                self.requests.append(request)
+                raise exc
+            return base(request)
+
+        self.client = lambda: httpx.Client(transport=httpx.MockTransport(hostile))
+
+
+class Clock:
+    """Monotonic clock that advances only through sleep, so the bounded wait is deterministic."""
+
+    def __init__(self, step: float = 0.0):
+        self.t = 0.0
+        self.step = step
+
+    def now(self) -> float:
+        self.t += self.step
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += seconds
+
+
+def make(api: FakeApify | None = None, key=KEY, clock: Clock | None = None):
+    api = api or FakeApify()
+    clock = clock or Clock()
+
+    def provider() -> str:
+        if key is None:
+            raise ValueError("APIFY_API_KEY is not set")
+        return key
+
+    src = CongressTrades(http_factory=api.client, key_provider=provider, monotonic=clock.now, sleep=clock.sleep)
+    return src, api
+
+
+def ctx(now=NOW, settings=SETTINGS, writer=None) -> RunContext:
+    return RunContext(now=now, settings=settings, writer=writer or (lambda ds, df: store.write(ds, df, now=now)))
+
+
+def with_congress(**over) -> dict:
+    return {**SETTINGS, "sources": {**SETTINGS["sources"], "congress_trades": CONGRESS | over}}
+
+
+def ledger() -> SpendLedger:
+    return SpendLedger(cg.ledger_path())
+
+
+def frame(src: CongressTrades, c: RunContext | None = None) -> pd.DataFrame:
+    """The rows one scheduled run hands to the writer (run delivers them and settles the day)."""
+    c = c or ctx()
+    delivered: list[pd.DataFrame] = []
+
+    def writer(ds, df):
+        delivered.append(df)
+        return len(df)
+
+    src.run(RunContext(now=c.now, settings=c.settings, writer=writer))
+    return pd.concat(delivered, ignore_index=True) if len(delivered) > 1 else delivered[-1]
+
+
+@pytest.fixture(autouse=True)
+def quiet_logs(caplog):
+    caplog.set_level(logging.DEBUG)
+
+
+def test_source_attributes_and_dataset():
+    src, _ = make()
+    assert src.name == "congress_trades" and src.rate_group == "apify"
+    assert src.schedule.at.hour == 8 and src.schedule.at.minute == 30 and str(src.schedule.tz) == "America/New_York"
+    ds = datasets.dataset("congress_trades")
+    assert src.datasets == (ds,) and ds.key == ("source_id",) and ds.ts_col == "ts"
+
+
+# ---- the spend ledger ---------------------------------------------------------------------------------------------
+
+
+def test_ledger_refuses_when_the_month_would_pass_80_percent_of_the_credit(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 3.95)
+    assert led.allowed(NOW, 0.05) is True  # exactly at the cap is still allowed
+    led.add(NOW, 0.01)
+    assert led.allowed(NOW, 0.05) is False
+    assert led.allowed(NOW, 0.0) is True
+
+
+def test_run_is_refused_when_the_month_would_pass_80_percent_of_the_credit():
+    src, api = make()
+    ledger().add(NOW, 3.99)
+    with pytest.raises(SourceError, match="monthly"):
+        frame(src)
+    assert api.requests == []
+
+
+def test_ledger_persists_across_restarts_and_rolls_over_at_the_utc_month_boundary(tmp_path):
+    path = tmp_path / "sub" / "l.json"
+    SpendLedger(path).add(datetime(2026, 11, 30, 23, 59, tzinfo=UTC), 1.25)
+    again = SpendLedger(path)
+    assert again.month_total(datetime(2026, 11, 3, tzinfo=UTC)) == pytest.approx(1.25)
+    again.add(datetime(2026, 11, 3, tzinfo=UTC), 0.5)
+    assert SpendLedger(path).month_total(datetime(2026, 11, 30, tzinfo=UTC)) == pytest.approx(1.75)
+    assert SpendLedger(path).month_total(datetime(2026, 12, 1, 0, 0, tzinfo=UTC)) == 0.0
+    # 20:00 New York on 30 November is already 1 December in UTC.
+    late = datetime(2026, 11, 30, 20, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert SpendLedger(path).month_total(late) == 0.0
+    assert [p.name for p in path.parent.iterdir()] == ["l.json"]  # no temp file left behind
+    assert set(json.loads(path.read_text())) <= {"months", "days"}
+
+
+def test_ledger_rejects_naive_datetimes_and_negative_costs(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    with pytest.raises(ValueError):
+        led.month_total(datetime(2026, 11, 1))  # noqa: DTZ001
+    with pytest.raises(ValueError):
+        led.add(NOW, -0.01)
+
+
+def test_a_corrupt_ledger_refuses_the_run_instead_of_starting_from_zero():
+    src, api = make()
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json")
+    with pytest.raises(SourceError, match="ledger"):
+        frame(src)
+    assert api.requests == []
+    assert path.read_text() == "{not json"
+
+
+def test_ledger_lives_under_the_data_directory(tmp_data_dir):
+    assert cg.ledger_path() == tmp_data_dir / "collect" / "apify_spend.json"
+
+
+# ---- the run itself -----------------------------------------------------------------------------------------------
+
+
+def test_every_run_sets_a_max_charge_equal_to_the_daily_cap():
+    src, api = make()
+    frame(src)
+    (start,) = api.starts()
+    query = parse_qs(start.url.query.decode())
+    assert float(query["maxTotalChargeUsd"][0]) == 0.05
+    assert json.loads(start.content) == {"lookbackDays": 7, "maxItems": 10}
+    assert query["maxItems"] == ["10"]
+    assert start.url.path == "/v2/acts/someone~congress-feed/runs"
+
+    other, api2 = make()
+    frame(other, ctx(now=NOW + timedelta(days=1), settings=with_congress() | {
+        "apify": {"monthly_cap_usd": 4.0, "daily_run_cap_usd": 0.03}}))
+    assert float(parse_qs(api2.starts()[0].url.query.decode())["maxTotalChargeUsd"][0]) == 0.03
+
+
+def test_the_run_has_a_bounded_timeout_and_the_item_limit_cannot_be_overridden_by_input():
+    src, api = make()
+    frame(src, ctx(settings=with_congress(input={"maxItems": 100000, "lookbackDays": 3})))
+    (start,) = api.starts()
+    assert json.loads(start.content)["maxItems"] == 10
+    assert 0 < int(parse_qs(start.url.query.decode())["timeout"][0]) <= 900
+
+
+def test_actual_cost_is_added_to_the_ledger():
+    src, _ = make(FakeApify(run=run_object(cost=0.0312)))
+    frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)
+    src2, _ = make(FakeApify(run=run_object(cost=0.04)))
+    frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert ledger().month_total(NOW) == pytest.approx(0.0712)
+
+
+def test_a_finished_run_without_a_cost_is_booked_at_the_daily_cap():
+    src, _ = make(FakeApify(run=run_object(cost=None)))
+    frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+    src2, _ = make(FakeApify(run=run_object(cost="free")))
+    frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert ledger().month_total(NOW) == pytest.approx(0.10)
+
+
+@pytest.mark.parametrize("status", ["FAILED", "ABORTED", "TIMED-OUT"])
+def test_a_run_that_does_not_succeed_raises_and_still_records_its_cost(status):
+    api = FakeApify(run=run_object(status, cost=0.021, statusMessage="actor crashed"))
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=status):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.021)
+    assert api.calls("GET", "/items") == []
+
+
+def test_polling_waits_for_the_run_with_wait_for_finish():
+    api = FakeApify(polls=["RUNNING", "RUNNING"])
+    src, _ = make(api)
+    assert len(frame(src)) == 2
+    polls = api.calls("GET", "/run1")
+    assert len(polls) == 3 and all("waitForFinish" in p.url.params for p in polls)
+    assert all(0 < int(p.url.params["waitForFinish"]) <= 60 for p in polls)
+
+
+def test_a_run_that_outlives_the_bounded_wait_is_aborted_and_its_cost_recorded():
+    api = FakeApify(polls=["RUNNING"] * 1000)
+    clock = Clock(step=30.0)
+    src, _ = make(api, clock=clock)
+    with pytest.raises(SourceError, match="did not finish"):
+        frame(src)
+    assert len(api.calls("POST", "/abort")) == 1
+    assert ledger().month_total(NOW) == pytest.approx(0.01)
+    assert len(api.calls("GET", "/run1")) < 100  # bounded
+
+
+def test_only_one_run_is_started_per_day_even_after_a_failure():
+    api = FakeApify(run=run_object("FAILED", cost=0.01))
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert len(api.starts()) == 1
+    n = len(api.requests)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(hours=2)))
+    assert len(api.requests) == n and len(api.starts()) == 1
+    assert ledger().day_state(NOW) == "settled_failed"
+    ok_api = FakeApify()
+    src2, _ = make(ok_api)
+    assert len(frame(src2, ctx(now=NOW + timedelta(days=1)))) == 2
+    assert len(ok_api.starts()) == 1
+
+
+def test_a_second_fetch_the_same_utc_day_makes_no_http_call_and_returns_no_rows():
+    src, api = make()
+    assert len(frame(src)) == 2
+    n = len(api.requests)
+    again = frame(src, ctx(now=NOW + timedelta(hours=3)))
+    assert again.empty and len(api.requests) == n
+
+
+@pytest.mark.parametrize("status", [400, 401, 402, 403, 404])
+def test_a_definite_rejection_of_the_start_releases_the_reservation_and_the_day(status):
+    api = FakeApify(start_status=status)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=str(status)):
+        frame(src)
+    assert ledger().month_total(NOW) == 0.0 and not ledger().started_on(NOW) and ledger().is_empty()
+    api.start_status = 201
+    assert len(frame(src)) == 2
+
+
+def test_rate_limit_on_start_maps_to_rate_limited():
+    src, _ = make(FakeApify(start_status=429))
+    with pytest.raises(RateLimited) as e:
+        frame(src)
+    assert e.value.retry_after_s == 600 and KEY not in str(e.value)
+    assert ledger().month_total(NOW) == 0.0 and not ledger().started_on(NOW)
+
+
+# ---- pricing check ------------------------------------------------------------------------------------------------
+
+
+def test_first_run_is_refused_when_pricing_could_exceed_the_daily_cap():
+    expensive = {"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {
+        "trade": {"eventTitle": "A trade", "eventPriceUsd": 0.01}}}}
+    api = FakeApify(details=pricing(expensive))
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="pricing"):
+        frame(src)
+    assert api.starts() == []
+    assert len(api.calls("GET", "congress-feed")) == 1
+    assert ledger().month_total(NOW) == 0.0
+
+
+def test_first_run_is_checked_against_per_item_pricing_and_start_fees():
+    per_item = {"pricingModel": "PRICE_PER_DATASET_ITEM", "pricePerUnitUsd": 0.0051}
+    src, api = make(FakeApify(details=pricing(per_item)))
+    with pytest.raises(SourceError, match="pricing"):
+        frame(src)
+    assert api.starts() == []
+    with_start = {"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {
+        "apify-actor-start": {"eventPriceUsd": 0.01}, "trade": {"eventPriceUsd": 0.0045}}}}
+    src2, api2 = make(FakeApify(details=pricing(with_start)))
+    with pytest.raises(SourceError, match="pricing"):
+        frame(src2)
+    assert api2.starts() == []
+    tiered = {"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {
+        "trade": {"eventTieredPricingUsd": {"FREE": {"tieredEventPriceUsd": 0.009}, "GOLD": {
+            "tieredEventPriceUsd": 0.004}}}}}}
+    src3, api3 = make(FakeApify(details=pricing(tiered)))
+    with pytest.raises(SourceError, match="pricing"):
+        frame(src3)
+    assert api3.starts() == []
+
+
+def test_first_run_proceeds_when_pricing_fits_and_the_pricing_is_not_asked_again():
+    src, api = make()
+    frame(src)
+    assert len(api.starts()) == 1 and len(api.calls("GET", "congress-feed")) == 1
+    api2 = FakeApify()
+    src2, _ = make(api2)
+    frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert api2.calls("GET", "congress-feed") == [] and len(api2.starts()) == 1
+
+
+@pytest.mark.parametrize("details", [
+    {"data": {}}, {"data": {"pricingInfos": []}}, {"unexpected": 1}, pricing({"pricingModel": "FREE"}),
+    pricing({"pricingModel": "PAY_PER_EVENT"}), pricing({"pricingModel": "FLAT_PRICE_PER_MONTH",
+                                                         "pricePerUnitUsd": 9.0}),
+    pricing({"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {"x": {"eventTitle": "t"}}}}),
+])
+def test_unknown_or_non_event_pricing_is_refused_before_any_run(details):
+    api = FakeApify(details=details)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="pricing"):
+        frame(src)
+    assert api.starts() == [] and ledger().month_total(NOW) == 0.0 and ledger().is_empty()
+
+
+# ---- the secret ---------------------------------------------------------------------------------------------------
+
+
+def test_every_request_carries_the_key_only_in_the_authorization_header():
+    src, api = make(FakeApify(polls=["RUNNING"]))
+    frame(src)
+    assert len(api.requests) >= 5
+    for r in api.requests:
+        assert r.headers["authorization"] == f"Bearer {KEY}"
+        assert r.url.scheme == "https" and r.url.host == "api.apify.com"
+        assert KEY not in str(r.url) and "token" not in str(r.url).lower()
+        assert KEY.encode() not in r.content
+        assert all(KEY not in v for k, v in r.headers.items() if k.lower() != "authorization")
+
+
+BODY_WITH_KEY = f'{{"error": "bad token {KEY} sent as Bearer {KEY}"}}' + " pad" * 200
+
+
+@pytest.mark.parametrize("where", ["limits", "start", "details", "poll", "items", "abort"])
+@pytest.mark.parametrize("failure", ["status", "transport", "bad-json"])
+def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog):
+    api = FakeApify(poll_failures=100 if where == "abort" else 0)  # failing polls lead to the abort request
+    base = api.handler
+    hits: list[str] = []
+
+    def hostile(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        target = {
+            "start": request.method == "POST" and path.endswith("/runs"),
+            "limits": request.method == "GET" and path == "/v2/users/me/limits",
+            "details": request.method == "GET" and path.startswith("/v2/acts/"),
+            "poll": request.method == "GET" and path.startswith("/v2/actor-runs/"),
+            "items": request.method == "GET" and path.startswith("/v2/datasets/"),
+            "abort": request.method == "POST" and path.endswith("/abort"),
+        }[where]
+        if not target:
+            return base(request)
+        hits.append(where)
+        if failure == "transport":
+            raise httpx.ConnectError(f"cannot reach {request.url} with Authorization: Bearer {KEY} / {KEY}")
+        if failure == "bad-json":
+            return httpx.Response(200, text=f"<html>{KEY}</html>")
+        return httpx.Response(401, text=BODY_WITH_KEY)
+
+    api.client = lambda: httpx.Client(transport=httpx.MockTransport(hostile))
+    src, _ = make(api)
+    with pytest.raises(SourceError) as e:
+        frame(src)
+    err = e.value
+    rendered = "".join(traceback.format_exception(err))
+    for text in (str(err), repr(err), rendered, caplog.text, *(r.getMessage() for r in caplog.records),
+                 *(str(r.__dict__) for r in caplog.records)):
+        assert KEY not in text
+    assert err.__cause__ is None and err.__context__ is None
+    if where == "abort":
+        assert hits == ["abort"]  # the failing abort request really was made
+    elif failure == "status":
+        assert "401" in str(err) and len(str(err)) < 400
+
+
+def test_secret_is_absent_from_every_stored_file_and_the_frame():
+    src, _ = make()
+    out = frame(src)
+    store.write(datasets.dataset("congress_trades"), out, now=NOW)
+    for path in (p for p in (config.DATA_DIR).rglob("*") if p.is_file()):
+        assert KEY.encode() not in path.read_bytes()
+    assert KEY not in out.to_csv()
+
+
+def test_error_bodies_are_redacted_and_cut_to_200_characters():
+    api = FakeApify(start_status=500)
+    src, _ = make(api)
+    with pytest.raises(SourceError) as e:
+        frame(src)
+    assert "500" in str(e.value) and "[redacted]" in str(e.value) and KEY not in str(e.value)
+    body = "x" * 190 + KEY + "y" * 500
+    assert KEY not in cg.redact(body) and len(cg.excerpt(body)) <= 200
+    assert KEY not in cg.excerpt(body)
+    assert cg.redact("Authorization: Bearer abc.DEF-123_xyz== tail") == "Authorization: Bearer [redacted] tail"
+
+
+def test_log_filter_redacts_the_key_in_messages_arguments_and_tracebacks(caplog):
+    cg.register_secret(KEY)
+    cg.log.info("plain %s and %s", KEY, {"k": f"Bearer {KEY}"})
+    cg.log.info(f"f-string {KEY}")
+    try:
+        raise RuntimeError(f"boom {KEY}")
+    except RuntimeError:
+        cg.log.warning("with traceback", exc_info=True)
+    assert caplog.records and KEY not in caplog.text
+    assert all(KEY not in r.getMessage() and KEY not in (r.exc_text or "") for r in caplog.records)
+    assert any(isinstance(f, cg.RedactingFilter) for f in cg.log.filters)
+
+
+def test_a_missing_key_is_a_clear_source_error_and_makes_no_http_call():
+    src, api = make(key=None)
+    with pytest.raises(SourceError, match="APIFY_API_KEY"):
+        frame(src)
+    assert api.requests == []
+    assert ledger().month_total(NOW) == 0.0
+
+
+def test_unexpected_exceptions_are_wrapped_without_the_key():
+    api = FakeApify()
+    base = api.handler
+
+    def boom(request):
+        if request.url.path.startswith("/v2/datasets/"):
+            raise KeyError(f"surprise {KEY}")
+        return base(request)
+
+    api.client = lambda: httpx.Client(transport=httpx.MockTransport(boom))
+    src, _ = make(api)
+    with pytest.raises(SourceError) as e:
+        frame(src)
+    assert KEY not in str(e.value) and KEY not in repr(e.value) and ledger().month_total(NOW) > 0
+
+
+def test_apify_key_helper_reads_env_lazily_and_never_puts_it_in_the_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    monkeypatch.delenv("APIFY_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="APIFY_API_KEY"):
+        config.apify_key()
+    monkeypatch.setenv("APIFY_API_KEY", f"  {KEY} \n")
+    assert config.apify_key() == KEY
+    monkeypatch.delenv("APIFY_API_KEY")
+    (tmp_path / ".env").write_text(f"APIFY_API_KEY={KEY}\n")
+    try:
+        assert config.apify_key() == KEY
+    finally:
+        os.environ.pop("APIFY_API_KEY", None)
+
+
+def test_settings_from_env_does_not_need_the_apify_key(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    monkeypatch.delenv("APIFY_API_KEY", raising=False)
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "a")
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "b")
+    assert config.Settings.from_env().alpaca_key_id == "a"
+
+
+# ---- rows ---------------------------------------------------------------------------------------------------------
+
+
+def test_rows_get_ts_in_utc_and_a_stable_source_id_and_the_mapped_fields():
+    src, _ = make()
+    first = frame(src)
+    assert str(first["ts"].dtype) == "datetime64[us, UTC]"
+    assert (first["ts"] == pd.Timestamp("2026-11-02", tz="UTC")).all()
+    assert first["source_id"].is_unique and first["source_id"].str.fullmatch("[0-9a-f]{40}").all()
+    row = first.iloc[0]
+    assert row["politician"] == "Sen Number0" and row["chamber"] == "Senate" and row["ticker"] == "MSFT"
+    assert row["transaction_type"] == "Sale (Partial)" and row["amount_range"] == "$1,001 - $15,000"
+    assert row["traded_date"] == "2026-10-15" and row["amount_min"] == 1001 and row["amount_max"] == 15000
+    assert "committees" not in first.columns and "ingested_at" not in first.columns
+
+    reordered, _ = make(FakeApify(items=[trade(1), trade(0)]))
+    second = frame(reordered, ctx(now=NOW + timedelta(days=1)))
+    assert set(first["source_id"]) == set(second["source_id"])
+    changed, _ = make(FakeApify(items=[trade(0, amountRange="$15,001 - $50,000")]))
+    third = frame(changed, ctx(now=NOW + timedelta(days=2)))
+    assert third["source_id"].iloc[0] not in set(first["source_id"])
+
+
+def test_source_id_comes_from_the_actors_id_field_when_configured():
+    items = [trade(0, documentId="d-1"), trade(1, documentId="d-2")]
+    src, _ = make(FakeApify(items=items))
+    out = frame(src, ctx(settings=with_congress(id_field="documentId", fields=FIELDS)))
+    assert list(out["source_id"]) == ["d-1", "d-2"]
+
+
+def test_ts_accepts_iso_timestamps_with_offsets_and_converts_to_utc():
+    items = [trade(0, disclosureDate="2026-11-02T20:15:00-05:00"), trade(1, disclosureDate="2026-11-02T12:00:00Z")]
+    src, _ = make(FakeApify(items=items))
+    out = frame(src)
+    assert list(out["ts"]) == [pd.Timestamp("2026-11-03 01:15", tz="UTC"), pd.Timestamp("2026-11-02 12:00", tz="UTC")]
+
+
+@pytest.mark.parametrize("items", [{"a": 1}, [1, 2], [trade(0, disclosureDate="soon")], [trade(0, disclosureDate=None)]])
+def test_unusable_items_raise_and_the_cost_is_still_booked(items):
+    src, _ = make(FakeApify(items=items))
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)
+
+
+def test_rows_without_a_usable_timestamp_are_dropped_with_a_warning_when_others_are_fine(caplog):
+    items = [trade(0), trade(1, disclosureDate="soon"), trade(2, disclosureDate=None)]
+    src, _ = make(FakeApify(items=items))
+    out = frame(src)
+    assert list(out["politician"]) == ["Sen Number0"]
+    assert "dropping 2" in caplog.text
+
+
+def test_an_empty_dataset_is_not_an_error():
+    src, _ = make(FakeApify(items=[]))
+    out = frame(src)
+    assert out.empty and list(out.columns[:2]) == ["source_id", "ts"]
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)
+
+
+def test_rows_are_stored_with_ingested_at_and_a_rerun_adds_nothing_new():
+    ds = datasets.dataset("congress_trades")
+    src, _ = make()
+    assert src.run(ctx()) == 2
+    stored = pd.read_parquet(ds.path)
+    assert len(stored) == 2 and (stored["ingested_at"] == pd.Timestamp(NOW)).all()
+    src2, _ = make()
+    assert src2.run(ctx(now=NOW + timedelta(days=1))) == 0
+    assert len(pd.read_parquet(ds.path)) == 2
+
+
+def test_no_backfill_a_run_makes_exactly_one_actor_start_and_reads_only_that_dataset():
+    src, api = make()
+    frame(src)
+    assert len(api.starts()) == 1
+    assert [r.url.path for r in api.calls("GET", "/items")] == ["/v2/datasets/ds1/items"]
+    assert int(api.calls("GET", "/items")[0].url.params["limit"]) == 10
+
+
+# ---- configuration ------------------------------------------------------------------------------------------------
+
+
+def test_the_actor_comes_from_settings_and_is_not_hardcoded():
+    src, api = make()
+    frame(src, ctx(settings=with_congress(actor="other-owner/other-actor")))
+    assert api.starts()[0].url.path == "/v2/acts/other-owner~other-actor/runs"
+    text = (config.ROOT / "src" / "tp" / "collect" / "sources" / "congress.py").read_text()
+    assert "smartmoney" not in text and "capitol" not in text.lower()
+
+
+@pytest.mark.parametrize("bad", ["", "no-slash", "a/b/c", "../x/y", "a b/c", "a/b?x=1"])
+def test_a_malformed_actor_id_is_rejected_before_any_http_call(bad):
+    src, api = make()
+    with pytest.raises(SourceError, match="actor"):
+        frame(src, ctx(settings=with_congress(actor=bad)))
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("apify", [
+    {}, {"monthly_cap_usd": 4.0}, {"monthly_cap_usd": 4.0, "daily_run_cap_usd": 0},
+    {"monthly_cap_usd": 4.0, "daily_run_cap_usd": "x"}, {"monthly_cap_usd": 4.0, "daily_run_cap_usd": 5.0},
+])
+def test_missing_or_nonsensical_caps_refuse_the_run(apify):
+    src, api = make()
+    with pytest.raises(SourceError, match="apify"):
+        frame(src, ctx(settings={**SETTINGS, "apify": apify}))
+    assert api.requests == []
+
+
+def test_a_monthly_cap_above_80_percent_of_the_credit_is_clamped():
+    src, api = make()
+    ledger().add(NOW, 3.99)
+    with pytest.raises(SourceError, match="monthly"):
+        frame(src, ctx(settings={**SETTINGS, "apify": {"monthly_cap_usd": 50.0, "daily_run_cap_usd": 0.05}}))
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("override", [{"max_items": 0}, {"max_items": "ten"}, {"max_items": 10_000},
+                                      {"fields": {}}, {"ts_field": ""}, {"id_fields": []}])
+def test_bad_source_settings_refuse_the_run(override):
+    src, api = make()
+    with pytest.raises(SourceError):
+        frame(src, ctx(settings=with_congress(**override)))
+    assert api.requests == []
+
+
+def test_shipped_config_ships_the_source_disabled_with_an_actor_and_a_field_map():
+    settings = config_toml()
+    table = source_settings(settings, "congress_trades")
+    assert table["enabled"] is False and table["lag_minutes"] == 0
+    assert table["schedule"] == "daily 08:30 America/New_York"
+    assert "/" in table["actor"] and table["fields"] and table["ts_field"] and table["max_items"] > 0
+    assert settings["apify"] == {"monthly_cap_usd": 4.0, "daily_run_cap_usd": 0.05}
+    assert table["max_items"] * 0.005 <= settings["apify"]["daily_run_cap_usd"] + 1e-9
+    assert "congress_trades" not in [s.name for s in build_sources(settings)]
+
+
+def config_toml() -> dict:
+    import tomllib
+
+    with open(config.ROOT / "config" / "collect.toml", "rb") as f:
+        return tomllib.load(f)
+
+
+def test_build_sources_registers_it_when_enabled_and_skips_it_when_disabled():
+    names = [s.name for s in build_sources(SETTINGS)]
+    assert "congress_trades" in names
+    found = {s.name: s for s in build_sources(SETTINGS)}["congress_trades"]
+    assert isinstance(found, CongressTrades) and found.schedule.at.hour == 8
+    off = with_congress(enabled=False)
+    assert "congress_trades" not in [s.name for s in build_sources(off)]
+
+
+# ---- reserve, then settle -----------------------------------------------------------------------------------------
+
+
+def is_start(request: httpx.Request) -> bool:
+    return request.method == "POST" and request.url.path.endswith("/runs")
+
+
+def test_reserve_is_one_atomic_write_of_the_cap_and_the_day_marker(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.reserve(NOW, 0.05)
+    assert json.loads((tmp_path / "l.json").read_text()) == {"months": {"2026-11": 0.05},
+                                                             "days": {"2026-11-12": "started"}}
+    assert led.started_on(NOW) and led.month_total(NOW) == pytest.approx(0.05) and not led.is_empty()
+
+
+def test_settle_books_the_difference_between_actual_and_reserved(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 1.0)
+    led.reserve(NOW, 0.05)
+    led.settle(NOW, 0.0312, 0.05)
+    assert led.month_total(NOW) == pytest.approx(1.0312)
+    led.reserve(NOW, 0.05)
+    led.settle(NOW, 0.07, 0.05)  # an overrun is booked too
+    assert led.month_total(NOW) == pytest.approx(1.0312 + 0.07)
+    before = led.month_total(NOW)
+    led.settle(NOW, None, 0.05)  # unknown actual: the reservation stays
+    assert led.month_total(NOW) == before
+    with pytest.raises(ValueError):
+        led.settle(NOW, -1.0, 0.05)
+
+
+def test_release_takes_back_the_reservation_and_the_day(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 1.0)
+    led.reserve(NOW, 0.05)
+    led.release(NOW, 0.05)
+    assert led.month_total(NOW) == pytest.approx(1.0) and not led.started_on(NOW)
+    SpendLedger(tmp_path / "e.json").release(NOW, 0.05)  # never goes negative
+
+
+def test_the_ledger_file_is_fsynced_before_it_replaces_the_old_one(monkeypatch, tmp_path):
+    calls = []
+    real = os.fsync
+    monkeypatch.setattr(cg.os, "fsync", lambda fd: (calls.append(fd), real(fd))[1])
+    SpendLedger(tmp_path / "l.json").add(NOW, 0.1)
+    assert len(calls) == 1
+
+
+def test_the_reservation_is_booked_before_the_start_request_is_sent():
+    api = FakeApify()
+    seen = []
+    base = api.handler
+
+    def spy(request):
+        if is_start(request):
+            seen.append((ledger().month_total(NOW), ledger().started_on(NOW)))
+        return base(request)
+
+    api.client = lambda: httpx.Client(transport=httpx.MockTransport(spy))
+    src, _ = make(api)
+    frame(src)
+    assert seen == [(pytest.approx(0.05), True)]
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)  # settled to the actual cost
+
+
+@pytest.mark.parametrize("exc", [httpx.ReadTimeout("slow"), httpx.RemoteProtocolError("hung up"),
+                                 httpx.ConnectError("refused")])
+def test_a_transport_error_on_the_start_keeps_the_reservation_and_blocks_a_same_day_retry(exc):
+    api = FakeApify()
+    api.fail_on(is_start, exc)
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+    assert len(api.starts()) == 1
+    assert ledger().day_state(NOW) == "started"
+    for later in (timedelta(seconds=60), timedelta(seconds=180), timedelta(hours=5)):
+        with pytest.raises(SourceError, match="did not complete; not retrying until the next UTC day"):
+            frame(src, ctx(now=NOW + later))
+    assert len(api.starts()) == 1 and ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize("status", [408, 500, 502, 503])
+def test_an_ambiguous_status_on_the_start_keeps_the_reservation(status):
+    api = FakeApify(start_status=status)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=str(status)):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(minutes=2)))
+    assert len(api.starts()) == 1
+
+
+def test_a_start_reply_without_a_run_id_keeps_the_reservation():
+    api = FakeApify()
+    base = api.handler
+    api.client = lambda: httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(201, json={"data": {}}) if is_start(r) else base(r)))
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="run id"):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+
+
+def test_when_the_reservation_cannot_be_written_no_run_is_started(monkeypatch):
+    def broken(self, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(SpendLedger, "reserve", broken)
+    api = FakeApify()
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="reserve"):
+        frame(src)
+    assert api.starts() == []
+
+
+def test_a_reservation_that_fails_midway_leaves_the_old_ledger_intact(monkeypatch, tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 1.0)
+    monkeypatch.setattr(cg.os, "replace", lambda *a: (_ for _ in ()).throw(OSError("no")))
+    with pytest.raises(OSError):
+        led.reserve(NOW, 0.05)
+    monkeypatch.undo()
+    assert led.month_total(NOW) == pytest.approx(1.0) and not led.started_on(NOW)
+    assert [p.name for p in tmp_path.iterdir()] == ["l.json"]
+
+
+def test_a_crash_after_the_start_leaves_the_reservation_in_the_ledger():
+    api = FakeApify()
+    api.fail_on(lambda r: r.method == "GET" and r.url.path.startswith("/v2/actor-runs/"), RuntimeError(f"boom {KEY}"))
+    src, _ = make(api)
+    with pytest.raises(SourceError) as e:
+        frame(src)
+    assert KEY not in str(e.value)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(minutes=5)))
+    assert len(api.starts()) == 1 and ledger().day_state(NOW) == "started"
+
+
+def test_a_run_still_not_terminal_after_the_abort_keeps_the_full_reservation():
+    api = FakeApify(polls=["RUNNING"] * 1000, abort_status="ABORTING")
+    api.abort_cost = 0.01
+    src, _ = make(api, clock=Clock(step=30.0))
+    with pytest.raises(SourceError, match="did not finish"):
+        frame(src)
+    assert len(api.calls("POST", "/abort")) == 1
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+    api2 = FakeApify(polls=["RUNNING"] * 1000, abort_status="RUNNING")
+    api2.abort_cost = 0.09  # a higher reported cost raises the booking
+    src2, _ = make(api2, clock=Clock(step=30.0))
+    with pytest.raises(SourceError):
+        frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert ledger().month_total(NOW) == pytest.approx(0.05 + 0.09)
+
+
+def test_a_terminal_run_without_a_reported_cost_keeps_the_reservation():
+    src, _ = make(FakeApify(run=run_object("FAILED", cost=None)))
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+def test_a_settle_that_cannot_be_written_is_an_error_and_the_reservation_stands(monkeypatch):
+    def broken(self, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(SpendLedger, "settle", broken)
+    src, _ = make()
+    with pytest.raises(SourceError, match="settle"):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+# ---- status polls -------------------------------------------------------------------------------------------------
+
+
+def test_a_failed_status_read_is_retried_before_the_run_is_given_up_on():
+    api = FakeApify(poll_failures=2)
+    src, _ = make(api)
+    assert len(frame(src)) == 2
+    assert api.calls("POST", "/abort") == [] and ledger().month_total(NOW) == pytest.approx(0.0312)
+
+
+def test_status_reads_that_keep_failing_abort_the_run_and_keep_the_reservation():
+    api = FakeApify(poll_failures=100, abort_status="ABORTING")
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="503"):
+        frame(src)
+    assert len(api.calls("POST", "/abort")) == 1
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+# ---- the account and the ledger ----------------------------------------------------------------------------------
+
+
+def limits(usage=0.0, limit=5.0) -> dict:
+    return {"data": {"current": {"monthlyUsageUsd": usage}, "limits": {"maxMonthlyUsageUsd": limit}}}
+
+
+def test_the_account_usage_is_read_with_the_bearer_header_before_every_start():
+    api = FakeApify()
+    src, _ = make(api)
+    frame(src)
+    frame(src, ctx(now=NOW + timedelta(days=1)))
+    reads = api.calls("GET", "/limits")
+    assert len(reads) == 2 and all(r.headers["authorization"] == f"Bearer {KEY}" for r in reads)
+    assert api.requests.index(reads[0]) < api.requests.index(api.starts()[0])
+
+
+@pytest.mark.parametrize("body", [limits(3.96), limits(4.0), limits(2.99, 3.0), limits(1.0, 0.0)])
+def test_a_run_is_refused_when_the_accounts_real_usage_would_pass_the_cap(body):
+    api = FakeApify(limits=body)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="refusing"):
+        frame(src)
+    assert api.starts() == [] and ledger().is_empty() and api.calls("GET", "congress-feed") == []
+
+
+@pytest.mark.parametrize("body", [limits(3.95), limits(0.0, 3.05), limits(0.0)])
+def test_a_run_goes_ahead_when_usage_plus_the_daily_cap_fits(body):
+    api = FakeApify(limits=body)
+    src, _ = make(api)
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+@pytest.mark.parametrize("body", [{}, {"data": {}}, {"data": {"current": {}, "limits": {}}},
+                                  {"data": {"current": {"monthlyUsageUsd": "1"}, "limits": {"maxMonthlyUsageUsd": 5}}},
+                                  {"data": {"current": {"monthlyUsageUsd": 1}}}, [], "x"])
+def test_missing_or_malformed_usage_fields_fail_closed(body):
+    api = FakeApify(limits=body)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="limits"):
+        frame(src)
+    assert api.starts() == [] and ledger().is_empty()
+
+
+def test_a_failed_usage_read_fails_closed():
+    api = FakeApify()
+    api.fail_on(lambda r: r.url.path == "/v2/users/me/limits", httpx.ReadTimeout("slow"))
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert api.starts() == [] and ledger().is_empty()
+    api2 = FakeApify()
+    api2.fail_on(lambda r: r.url.path == "/v2/users/me/limits", RuntimeError("x"))
+    src2, _ = make(api2)
+    with pytest.raises(SourceError):
+        frame(src2)
+    assert api2.starts() == []
+    unauthorized = FakeApify()
+    base = unauthorized.handler
+    unauthorized.client = lambda: httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(401, json={}) if r.url.path == "/v2/users/me/limits" else base(r)))
+    src3, _ = make(unauthorized)
+    with pytest.raises(SourceError, match="401"):
+        frame(src3)
+    assert unauthorized.starts() == []
+
+
+MISSING = "ledger missing but earlier runs exist"
+
+
+def test_a_missing_ledger_is_refused_when_the_state_file_shows_an_earlier_success(tmp_data_dir):
+    from tp.collect.state import State
+
+    State().record_success("congress_trades", NOW - timedelta(days=1), 3)
+    api = FakeApify()
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=MISSING):
+        frame(src)
+    assert api.requests == [] and not cg.ledger_path().exists()
+
+
+def test_a_missing_ledger_is_refused_when_the_dataset_file_exists():
+    ds = datasets.dataset("congress_trades")
+    ds.path.parent.mkdir(parents=True, exist_ok=True)
+    ds.path.write_bytes(b"x")
+    api = FakeApify()
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=MISSING):
+        frame(src)
+    assert api.requests == []
+
+
+def test_a_missing_ledger_with_no_earlier_run_is_a_normal_first_run(tmp_data_dir):
+    from tp.collect.state import State
+
+    State().record_success("sec_filings", NOW, 3)  # another source's success is no evidence
+    src, api = make()
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+def test_an_existing_ledger_with_earlier_runs_is_fine(tmp_data_dir):
+    from tp.collect.state import State
+
+    State().record_success("congress_trades", NOW - timedelta(days=1), 3)
+    ledger().add(NOW - timedelta(days=1), 0.03)
+    src, api = make()
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+# ---- small things -------------------------------------------------------------------------------------------------
+
+
+def test_a_missing_key_creates_no_http_client():
+    created = []
+    api = FakeApify()
+    src = CongressTrades(http_factory=lambda: created.append(1) or api.client(), key_provider=lambda: (_ for _ in ()).throw(
+        ValueError("APIFY_API_KEY is not set")))
+    with pytest.raises(SourceError, match="APIFY_API_KEY"):
+        frame(src)
+    assert created == []
+
+
+def test_the_http_client_is_closed_after_a_refusal():
+    closed = []
+    api = FakeApify(limits=limits(4.0))
+
+    def factory():
+        client = api.client()
+        real = client.close
+        client.close = lambda: (closed.append(1), real())[1]
+        return client
+
+    src = CongressTrades(http_factory=factory, key_provider=lambda: KEY, monotonic=Clock().now, sleep=Clock().sleep)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert closed == [1]
+
+
+def test_the_module_docstring_carries_the_operator_note():
+    doc = cg.__doc__
+    assert "$4 monthly usage limit" in doc and "Apify console" in doc and "input" in doc and "enabled = true" in doc
+
+
+# ---- the outcome of each day -------------------------------------------------------------------------------------
+
+
+def test_a_successful_run_marks_the_day_settled_ok_and_a_same_day_retry_is_an_error_free_no_op():
+    api = FakeApify()
+    src, _ = make(api)
+    assert len(frame(src)) == 2
+    assert ledger().day_state(NOW) == "settled_ok"
+    n = len(api.requests)
+    again = frame(src, ctx(now=NOW + timedelta(hours=4)))
+    assert again.empty and len(api.requests) == n
+
+
+@pytest.mark.parametrize("status", ["FAILED", "ABORTED", "TIMED-OUT"])
+def test_a_run_that_ends_badly_marks_the_day_failed_and_a_retry_raises(status):
+    api = FakeApify(run=run_object(status, cost=0.02))
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=status):
+        frame(src)
+    assert ledger().day_state(NOW) == "settled_failed"
+    with pytest.raises(SourceError, match="already started today and did not complete"):
+        frame(src, ctx(now=NOW + timedelta(seconds=60)))
+    assert len(api.starts()) == 1
+
+
+def test_a_timed_out_wait_and_unreadable_items_mark_the_day_failed():
+    api = FakeApify(polls=["RUNNING"] * 1000)
+    src, _ = make(api, clock=Clock(step=30.0))
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().day_state(NOW) == "settled_failed"
+    src2, _ = make(FakeApify(items={"not": "a list"}))
+    with pytest.raises(SourceError):
+        frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert ledger().day_state(NOW + timedelta(days=1)) == "settled_failed"
+
+
+def test_the_next_utc_day_starts_fresh_after_a_failed_day():
+    api = FakeApify(start_status=503)
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW.replace(hour=23, minute=59)))
+    api.start_status = 201
+    tomorrow = ctx(now=datetime(2026, 11, 13, 0, 1, tzinfo=UTC))
+    assert len(frame(src, tomorrow)) == 2
+    days = json.loads(cg.ledger_path().read_text())["days"]
+    assert days == {"2026-11-12": "started", "2026-11-13": "settled_ok"}
+
+
+def test_old_day_records_are_pruned():
+    led = ledger()
+    led.reserve(NOW - timedelta(days=100), 0.05)
+    led.reserve(NOW, 0.05)
+    assert list(json.loads(cg.ledger_path().read_text())["days"]) == ["2026-11-12"]
+
+
+def test_a_round_one_ledger_without_day_records_loads_and_only_todays_marker_counts():
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {"2026-11": 0.1}, "started": ["2026-11-11", "2026-11-12"]}))
+    led = ledger()
+    assert led.month_total(NOW) == pytest.approx(0.1) and led.day_state(NOW) == "started"
+    assert led.day_state(NOW + timedelta(days=1)) is None
+    src, api = make()
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src)
+    assert api.requests == []
+    assert len(frame(src, ctx(now=NOW + timedelta(days=1)))) == 2  # tomorrow runs; the legacy list is rewritten
+    assert set(json.loads(path.read_text())) == {"months", "days"}
+
+
+def test_a_round_one_ledger_whose_marker_is_another_day_runs_today():
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {"2026-11": 0.1}, "started": ["2026-11-11"]}))
+    src, api = make()
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+@pytest.mark.parametrize("state", ["weird", 7, None, ["x"], {"a": 1}])
+def test_an_unknown_day_state_fails_closed(state):
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {}, "days": {"2026-11-12": state}}))
+    src, api = make()
+    assert ledger().day_state(NOW) == "started"
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src)
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("days", ["x", [1], 3])
+def test_a_malformed_days_table_refuses_the_run(days):
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {}, "days": days}))
+    src, api = make()
+    with pytest.raises(SourceError, match="ledger"):
+        frame(src)
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("entry", ["oops", 5, ["x"], None, {"last_success": "garbage"},
+                                   {"last_success": "2026-11-01T00:00:00+00:00"}])
+def test_a_malformed_state_entry_counts_as_evidence_of_earlier_runs(tmp_data_dir, entry):
+    path = tmp_data_dir / "collect" / "state.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"congress_trades": entry}))
+    assert cg.earlier_runs_exist() is True
+
+
+def test_an_empty_or_unreadable_state_entry_is_no_evidence(tmp_data_dir):
+    path = tmp_data_dir / "collect" / "state.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"congress_trades": {"failures": 2}}))
+    assert cg.earlier_runs_exist() is False
+    path.write_text("{broken")
+    assert cg.earlier_runs_exist() is False
+    path.write_text(json.dumps({"congress_trades": "oops"}))
+    assert cg.earlier_runs_exist() is True
+
+
+# ---- paid rows stay pending until the writer confirms -------------------------------------------------------------
+
+
+class Boom(Exception):
+    pass
+
+
+def failing_writer(ds, df):
+    raise Boom("disk full")
+
+
+def run_with(src, writer, now=NOW, settings=SETTINGS):
+    return src.run(RunContext(now=now, settings=settings, writer=writer))
+
+
+def test_a_ledger_with_neither_days_nor_started_is_refused():
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {"2026-11": 0.1}}))
+    src, api = make()
+    with pytest.raises(SourceError, match="ledger"):
+        frame(src)
+    assert api.requests == []
+
+
+def test_a_failing_writer_leaves_the_rows_pending_and_the_day_fetched():
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    assert cg.pending_path().exists() and ledger().day_state(NOW) == "fetched"
+    assert len(pd.read_parquet(cg.pending_path())) == 2
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)  # the cost is settled either way
+    assert len(api.starts()) == 1
+
+
+def test_the_retry_delivers_the_pending_rows_without_any_http_call_then_settles():
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    n = len(api.requests)
+    got = []
+    run_with(src, lambda ds, df: got.append(df) or len(df), now=NOW + timedelta(seconds=60))
+    assert len(api.requests) == n
+    assert len(got[0]) == 2 and got[0]["source_id"].is_unique
+    assert ledger().day_state(NOW) == "settled_ok" and not cg.pending_path().exists()
+    assert [p.name for p in cg.pending_path().parent.iterdir() if "pending" in p.name] == []
+    # and a further same-day run is the quiet no-op of a settled day
+    assert frame(src, ctx(now=NOW + timedelta(hours=3))).empty and len(api.requests) == n
+
+
+def test_a_fetch_call_returns_the_pending_rows_without_http_even_before_the_gate():
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    n = len(api.requests)
+    out = src.fetch(ctx(now=NOW + timedelta(minutes=1)))[datasets.dataset("congress_trades")]
+    assert len(out) == 2 and len(api.requests) == n
+
+
+def test_a_crash_between_the_pending_write_and_the_writer_is_recovered_on_the_next_utc_day():
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)  # the process dies after the pending write, before the rows are stored
+    assert cg.pending_path().exists()
+    api2 = FakeApify(items=[trade(5)])
+    src2, _ = make(api2)  # a restarted daemon, the next UTC day
+    order = []
+    next_day = NOW + timedelta(days=1)
+    run_with(src2, lambda ds, df: order.append((list(df["politician"]), len(api2.requests))) or len(df), now=next_day)
+    assert order == [(["Sen Number0", "Sen Number1"], 0), (["Sen Number5"], order[1][1])]
+    assert order[1][1] > 0 and len(api2.starts()) == 1  # the new run started only after the delivery
+    assert not cg.pending_path().exists()
+    assert ledger().day_state(NOW) == "settled_ok" and ledger().day_state(next_day) == "settled_ok"
+
+
+def test_a_corrupt_pending_file_raises_with_no_http_and_is_left_in_place():
+    src, api = make()
+    cg.pending_path().parent.mkdir(parents=True)
+    cg.pending_path().write_bytes(b"not parquet")
+    with pytest.raises(SourceError, match="pending"):
+        run_with(src, lambda ds, df: len(df))
+    with pytest.raises(SourceError, match="pending"):
+        src.fetch(ctx())
+    assert api.requests == [] and cg.pending_path().read_bytes() == b"not parquet"
+
+
+@pytest.mark.parametrize("columns", [{"x": [1]}, {"source_id": [None], "ts": [pd.Timestamp("2026-11-02", tz="UTC")]},
+                                     {"source_id": ["a"], "ts": ["2026-11-02"]}])
+def test_a_pending_file_that_is_not_rows_is_corrupt(columns):
+    src, api = make()
+    cg.pending_path().parent.mkdir(parents=True)
+    pd.DataFrame(columns).to_parquet(cg.pending_path())
+    with pytest.raises(SourceError, match="pending"):
+        run_with(src, lambda ds, df: len(df))
+    assert api.requests == [] and cg.pending_path().exists()
+
+
+def test_double_delivery_through_the_store_does_not_duplicate_rows():
+    ds = datasets.dataset("congress_trades")
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    pending = pd.read_parquet(cg.pending_path())
+    assert store.write(ds, pending, now=NOW) == 2
+    assert store.write(ds, pending, now=NOW + timedelta(minutes=1)) == 0
+    run_with(src, lambda d, df: store.write(d, df, now=NOW + timedelta(minutes=2)), now=NOW + timedelta(minutes=2))
+    stored = pd.read_parquet(ds.path)
+    assert len(stored) == 2 and stored["source_id"].is_unique
+
+
+def test_the_pending_rows_round_trip_with_their_dtypes():
+    src, _ = make()
+    first = []
+    with pytest.raises(Boom):
+        run_with(src, lambda ds, df: first.append(df) or failing_writer(ds, df))
+    back = pd.read_parquet(cg.pending_path())
+    pd.testing.assert_frame_equal(back, first[0])
+
+
+def test_the_pending_file_is_written_atomically_with_a_pid_suffixed_temp_and_fsync(monkeypatch):
+    seen = {"fsync": 0, "tmp": []}
+    real_replace, real_fsync = os.replace, os.fsync
+    monkeypatch.setattr(cg.os, "fsync", lambda fd: (seen.__setitem__("fsync", seen["fsync"] + 1), real_fsync(fd))[1])
+    monkeypatch.setattr(cg.os, "replace", lambda a, b: (seen["tmp"].append(str(a)), real_replace(a, b))[1])
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    assert any(t.endswith(f".pending.parquet.{os.getpid()}.tmp") for t in seen["tmp"]) and seen["fsync"] >= 2
+    assert not list(cg.pending_path().parent.glob("*.tmp"))
+
+
+def test_a_pending_write_failure_still_hands_the_rows_to_the_writer(monkeypatch):
+    monkeypatch.setattr(cg, "_write_pending", lambda frame: (_ for _ in ()).throw(OSError("full")))
+    src, _ = make()
+    got = []
+    run_with(src, lambda ds, df: got.append(len(df)) or len(df))
+    assert got == [2] and ledger().day_state(NOW) == "settled_ok"
+
+
+def test_a_failing_writer_after_a_failed_pending_write_leaves_the_day_unresolved(monkeypatch):
+    monkeypatch.setattr(cg, "_write_pending", lambda frame: (_ for _ in ()).throw(OSError("full")))
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(minutes=1)))
+    assert len(api.starts()) == 1
+
+
+def test_an_empty_dataset_settles_the_day_without_a_pending_file():
+    src, _ = make(FakeApify(items=[]))
+    assert frame(src).empty
+    assert ledger().day_state(NOW) == "settled_ok" and not cg.pending_path().exists()
+
+
+def test_a_ledger_that_cannot_be_updated_after_delivery_keeps_the_rows_pending(monkeypatch):
+    src, _ = make()
+    monkeypatch.setattr(SpendLedger, "settle_fetched", lambda self: (_ for _ in ()).throw(OSError("ro")))
+    with pytest.raises(SourceError, match="pending"):
+        run_with(src, lambda ds, df: len(df))
+    assert cg.pending_path().exists() and ledger().day_state(NOW) == "fetched"
+    monkeypatch.undo()
+    got = []
+    run_with(src, lambda ds, df: got.append(len(df)) or len(df), now=NOW + timedelta(minutes=2))
+    assert got and ledger().day_state(NOW) == "settled_ok" and not cg.pending_path().exists()
+
+
+def test_the_pending_file_holds_no_secret():
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    assert KEY.encode() not in cg.pending_path().read_bytes()

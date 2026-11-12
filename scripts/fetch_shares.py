@@ -11,51 +11,30 @@ no analysis reads them.
 from __future__ import annotations
 
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
 from tp import config
-from tp.edgar import EdgarBlocked, EdgarClient
-
-URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
-FORMS = {"10-K", "10-Q"}
-COLUMNS = ["accn", "form", "filed", "end", "val"]
-
-
-def shares_rows(facts: dict) -> pd.DataFrame:
-    units = facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding", {}).get("units", {}).get("shares", [])
-    rows = [{k: u[k] for k in COLUMNS} for u in units if u.get("form") in FORMS]
-    out = pd.DataFrame(rows, columns=COLUMNS)
-    out["filed"], out["end"] = pd.to_datetime(out["filed"]), pd.to_datetime(out["end"])
-    return out.drop_duplicates()
-
-
-def _ok(r):
-    r.raise_for_status()
-    return r
+from tp.collect import daemon, datasets, store
+from tp.collect.sources import sec
+from tp.edgar import EdgarBadResponse, EdgarBlocked, EdgarClient
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     folder = config.DATA_DIR / "xbrl"
     by_symbol = folder / "by_symbol"
     by_symbol.mkdir(parents=True, exist_ok=True)
-    symbols = list(dict.fromkeys([*config.load_universe()["universe"]["traded"], *config.events_symbols(), *config.confirm_symbols()]))
+    symbols = sec.xbrl_symbols()
     client = EdgarClient()
     cik_of = client.ticker_map()
     todo = [(sym, cik_of[sym]) for sym in symbols if sym in cik_of and not (by_symbol / f"{sym}.parquet").exists()]
 
     def one(item: tuple[str, int]) -> None:
         sym, cik = item
-        time.sleep(0.35)  # SEC fair access: four workers stay well under 10 requests a second
-        r = client._http.get(URL.format(cik=cik))
-        if r.status_code in (403, 429):
-            raise EdgarBlocked(f"HTTP {r.status_code} for {sym}: rate-limited, retry in ~10 minutes")
-        df = pd.DataFrame(columns=COLUMNS) if r.status_code == 404 else shares_rows(_ok(r).json())
-        df.insert(0, "cik", cik)
-        df.insert(0, "symbol", sym)
-        df.to_parquet(by_symbol / f"{sym}.parquet", index=False)
+        sec.atomic_parquet(sec.fetch_shares(client._http, sym, cik), by_symbol / f"{sym}.parquet")
 
     try:
         with ThreadPoolExecutor(4) as pool:
@@ -65,8 +44,13 @@ def main() -> int:
     except EdgarBlocked as e:
         print(f"SEC rate limit: {e}. Finished symbols are kept; rerun later.", file=sys.stderr)
         return 2
+    except EdgarBadResponse as e:
+        print(f"Bad SEC response: {e}. Finished symbols are kept; rerun later.", file=sys.stderr)
+        return 1
     allrows = pd.concat([pd.read_parquet(p) for p in sorted(by_symbol.glob("*.parquet"))], ignore_index=True)
-    allrows.to_parquet(folder / "shares.parquet", index=False)
+    ds = datasets.dataset("xbrl_shares")  # keep the rows the recorder added since the caches were built
+    allrows = store.merge_rebuilt(ds, allrows)
+    sec.atomic_parquet(allrows, ds.path)
     print(f"{len(allrows):,} share counts for {allrows['symbol'].nunique()} symbols; filed {allrows['filed'].min():%Y-%m-%d} to {allrows['filed'].max():%Y-%m-%d}")
     return 0
 

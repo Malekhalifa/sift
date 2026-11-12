@@ -31,6 +31,10 @@ TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
 
 
+class EdgarBadResponse(RuntimeError):
+    """A 200 response that is not the JSON document we asked for; the cache is left untouched."""
+
+
 class EdgarBlocked(RuntimeError):
     """The SEC rate-limited us (403/429). The block usually clears in about ten minutes; stop and retry later."""
 
@@ -92,9 +96,11 @@ class EdgarClient:
         self._http = http or httpx.Client(headers={"User-Agent": user_agent(), "Accept-Encoding": "gzip, deflate"}, timeout=30.0)
         self._last = 0.0
 
-    def _get_json(self, url: str, cache_name: str) -> dict:
+    def _get_json(self, url: str, cache_name: str, refresh: bool = False, require: str | None = None) -> dict:
+        """Cached GET. With refresh=True the cache is not read and is atomically replaced by the fresh response.
+        A body that is not JSON, or lacks the `require` key, raises EdgarBadResponse and never reaches the cache."""
         path = self.cache / cache_name
-        if path.exists():
+        if not refresh and path.exists():
             return json.loads(path.read_text())
         wait = MIN_INTERVAL_S - (time.monotonic() - self._last)
         if wait > 0:
@@ -104,32 +110,41 @@ class EdgarClient:
         if r.status_code in (403, 429):
             raise EdgarBlocked(f"HTTP {r.status_code} from {url.split('/')[2]}: rate-limited, retry in ~10 minutes")
         r.raise_for_status()
-        data = r.json()
-        path.write_text(json.dumps(data))
+        try:
+            data = r.json()
+        except ValueError as e:
+            raise EdgarBadResponse(f"{url}: response is not JSON") from e
+        if require is not None and not (isinstance(data, dict) and require in data):
+            raise EdgarBadResponse(f"{url}: response lacks {require!r}")
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(json.dumps(data))
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         return data
 
-    def ticker_map(self) -> dict[str, int]:
+    def ticker_map(self, refresh: bool = False) -> dict[str, int]:
         """Current ticker -> CIK."""
-        raw = self._get_json(TICKERS_URL, "company_tickers.json")
+        raw = self._get_json(TICKERS_URL, "company_tickers.json", refresh=refresh)
         return {row["ticker"].upper(): int(row["cik_str"]) for row in raw.values()}
 
-    def earnings_filings(self, cik: int) -> pd.DataFrame:
-        main = self._get_json(SUBMISSIONS_URL.format(name=f"CIK{cik:010d}.json"), f"CIK{cik:010d}.json")
+    def submission_pages(self, cik: int, refresh: bool = False) -> list[dict]:
+        """The CIK's main submissions JSON (the recent block) followed by its older pages. Only the main file is
+        refreshed; older pages never change, so they come from the cache and are downloaded only when missing."""
+        name = f"CIK{cik:010d}.json"
+        main = self._get_json(SUBMISSIONS_URL.format(name=name), name, refresh=refresh, require="filings")
         pages = [main]
         for extra in main.get("filings", {}).get("files", []):
-            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
-        return parse_earnings(pages)
+            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"], require="accessionNumber"))
+        return pages
+
+    def earnings_filings(self, cik: int) -> pd.DataFrame:
+        return parse_earnings(self.submission_pages(cik))
 
     def eightk_filings(self, cik: int) -> pd.DataFrame:
-        main = self._get_json(SUBMISSIONS_URL.format(name=f"CIK{cik:010d}.json"), f"CIK{cik:010d}.json")
-        pages = [main]
-        for extra in main.get("filings", {}).get("files", []):
-            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
-        return parse_eightk(pages)
+        return parse_eightk(self.submission_pages(cik))
 
     def tenk_filings(self, cik: int) -> pd.DataFrame:
-        main = self._get_json(SUBMISSIONS_URL.format(name=f"CIK{cik:010d}.json"), f"CIK{cik:010d}.json")
-        pages = [main]
-        for extra in main.get("filings", {}).get("files", []):
-            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
-        return parse_tenk(pages)
+        return parse_tenk(self.submission_pages(cik))

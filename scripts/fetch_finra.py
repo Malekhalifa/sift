@@ -10,7 +10,6 @@ Rows from 2025 on are kept for the sealed holdout; no analysis reads them.
 
 from __future__ import annotations
 
-import io
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -19,30 +18,14 @@ import httpx
 import pandas as pd
 
 from tp import config
-
-URL = "https://cdn.finra.org/equity/regsho/daily/CNMSshvol{day}.txt"
-FIRST = date(2018, 8, 1)
-COLUMNS = {"Date": "date", "Symbol": "symbol", "ShortVolume": "short", "ShortExemptVolume": "exempt", "TotalVolume": "total"}
-
-
-def fetch_day(http: httpx.Client, day: date, symbols: set[str]) -> pd.DataFrame | None:
-    """Rows for the universe on `day`, or None when FINRA has no file for that date."""
-    for attempt in range(4):
-        try:
-            r = http.get(URL.format(day=day.strftime("%Y%m%d")))
-        except httpx.TransportError:
-            continue
-        if r.status_code in (403, 404):
-            return None
-        if r.status_code == 200:
-            df = pd.read_csv(io.StringIO(r.text), sep="|", dtype={"Date": str, "Symbol": str})
-            df = df[df["Symbol"].isin(symbols)].rename(columns=COLUMNS)
-            df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
-            return df[["date", "symbol", "short", "exempt", "total"]].reset_index(drop=True)
-    raise RuntimeError(f"FINRA {day}: no usable response after retries")
+from tp.collect import daemon
+from tp.collect.sources.finra import FIRST, fetch_day, merge_shortvol, write_days
+from tp.collect.sources.sec import atomic_parquet
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     folder = config.DATA_DIR / "finra"
     daily = folder / "daily"
     daily.mkdir(parents=True, exist_ok=True)
@@ -61,9 +44,12 @@ def main() -> int:
                 df.to_parquet(daily / f"{day:%Y%m%d}.parquet", index=False)
             if i % 100 == 0:
                 print(f"  {i}/{len(todo)}", file=sys.stderr)
-    gaps_path.write_text("\n".join(sorted(known_gaps)))
+    write_days(gaps_path, known_gaps)
     out = pd.concat([pd.read_parquet(p) for p in sorted(daily.glob("*.parquet"))], ignore_index=True)
-    out.to_parquet(folder / "shortvol.parquet", index=False)
+    stored = folder / "shortvol.parquet"
+    if stored.exists():  # keep what the recorder added (ingested_at, survivorship-free symbols)
+        out = merge_shortvol(pd.read_parquet(stored), out)
+    atomic_parquet(out, stored)
     print(f"{len(out):,} rows, {out['symbol'].nunique()} symbols, {out['date'].nunique()} days, {out['date'].min():%Y-%m-%d} to {out['date'].max():%Y-%m-%d}; {len(known_gaps)} days without a file")
     return 0
 

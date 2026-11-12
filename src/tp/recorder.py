@@ -84,8 +84,15 @@ def parse_specs(text: str | None) -> list[tuple[str, str]]:
 def run_plan(client: AlpacaClient, plan: list[tuple[str, str, str]], now: datetime, workers: int = 1) -> list[str]:
     """Sync every (feed, timeframe, symbol). Each series writes its own files, so they can run in parallel; the
     client throttles all threads to one shared request rate. Returns the failures instead of raising."""
+    return sync_plan(client, plan, now, workers)[1]
+
+
+def sync_plan(
+    client: AlpacaClient, plan: list[tuple[str, str, str]], now: datetime, workers: int = 1
+) -> tuple[int, list[str]]:
+    """run_plan that also returns the total number of bars added: (bars_added, failures)."""
     total, failures = len(plan), []
-    lock, finished = threading.Lock(), [0]
+    lock, finished, bars = threading.Lock(), [0], [0]
 
     def one(item: tuple[str, str, str]) -> None:
         feed, timeframe, symbol = item
@@ -96,6 +103,7 @@ def run_plan(client: AlpacaClient, plan: list[tuple[str, str, str]], now: dateti
             added, error = 0, e
         with lock:
             finished[0] += 1
+            bars[0] += added
             if error is not None:
                 failures.append(f"{feed}/{timeframe}/{symbol}: {error}")
                 log.error("[%d/%d] %s %s %s FAILED: %s", finished[0], total, feed, timeframe, symbol, error)
@@ -104,14 +112,15 @@ def run_plan(client: AlpacaClient, plan: list[tuple[str, str, str]], now: dateti
 
     with ThreadPoolExecutor(max_workers=max(workers, 1)) as pool:
         list(pool.map(one, plan))
-    return failures
+    return bars[0], failures
 
 
 def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
     """(feed, timeframe, symbol) triples to sync, in SPECS order. `symbols` restricts to those names."""
     core, wide, events, confirm = config.core_symbols(), config.wide_symbols(), config.events_symbols(), config.confirm_symbols()
-    everyone = list(dict.fromkeys([*core, *wide, *events, *confirm]))
-    pool = {"core": core, "wide": wide, "events": events, "confirm": confirm, "all": everyone}[universe]
+    sf = config.sf_symbols()
+    everyone = list(dict.fromkeys([*core, *wide, *events, *confirm, *sf]))
+    pool = {"core": core, "wide": wide, "events": events, "confirm": confirm, "sf": sf, "all": everyone}[universe]
     if symbols:
         pool = symbols
     plan = []
@@ -126,7 +135,7 @@ def build_plan(symbols: list[str] | None, universe: str, specs: list[tuple[str, 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--symbols", help="comma-separated; default is the chosen universe")
-    ap.add_argument("--universe", choices=["core", "wide", "events", "confirm", "all"], default="all")
+    ap.add_argument("--universe", choices=["core", "wide", "events", "confirm", "sf", "all"], default="all")
     ap.add_argument("--specs", help="comma-separated feed:timeframe; default is all")
     ap.add_argument("--workers", type=int, default=1, help="parallel series (all share one request-rate budget)")
     args = ap.parse_args(argv)

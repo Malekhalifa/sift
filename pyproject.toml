@@ -5,13 +5,18 @@ description = "Sift: a pre-registered research pipeline for testing short-term U
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
+    "lxml>=5",
     "pandas>=2.2",
+    "prometheus-client>=0.20",
     "pyarrow>=17",
     "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pyyaml>=6.0.3",
+]
 
 [build-system]
 requires = ["hatchling"]
