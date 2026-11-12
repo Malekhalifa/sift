@@ -69,6 +69,21 @@ def parse_eightk(pages: list[dict]) -> pd.DataFrame:
     out["filed_at"] = pd.to_datetime(out["filed_at"], utc=True)
     return out.drop_duplicates("accession").sort_values("filed_at").reset_index(drop=True)
 
+def parse_tenk(pages: list[dict]) -> pd.DataFrame:
+    """Every 10-K (not amendments) from submission pages: accession, acceptance time (UTC), period end and main document."""
+    rows = []
+    for page in pages:
+        cols = page.get("filings", {}).get("recent", page)
+        for form, accn, accepted, report, doc in zip(
+            cols.get("form", []), cols.get("accessionNumber", []), cols.get("acceptanceDateTime", []),
+            cols.get("reportDate", []), cols.get("primaryDocument", []), strict=False
+        ):
+            if form == "10-K":
+                rows.append({"accn": accn, "filed_at": pd.Timestamp(accepted), "report_date": report, "doc": doc})
+    out = pd.DataFrame(rows, columns=["accn", "filed_at", "report_date", "doc"])
+    out["filed_at"] = pd.to_datetime(out["filed_at"], utc=True)
+    return out.drop_duplicates("accn").sort_values("filed_at").reset_index(drop=True)
+
 
 class EdgarClient:
     def __init__(self, cache_dir: Path | None = None, http: httpx.Client | None = None):
@@ -111,3 +126,10 @@ class EdgarClient:
         for extra in main.get("filings", {}).get("files", []):
             pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
         return parse_eightk(pages)
+
+    def tenk_filings(self, cik: int) -> pd.DataFrame:
+        main = self._get_json(SUBMISSIONS_URL.format(name=f"CIK{cik:010d}.json"), f"CIK{cik:010d}.json")
+        pages = [main]
+        for extra in main.get("filings", {}).get("files", []):
+            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
+        return parse_tenk(pages)
