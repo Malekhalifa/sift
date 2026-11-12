@@ -1,4 +1,4 @@
-"""Command line for the recorder: run | once <source> | qa [--date] | status."""
+"""Command line for the recorder: run | once <source> | qa [--date] [--full] | status."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +11,7 @@ from datetime import date, datetime, time, timezone
 
 from tp.collect import daemon, store
 from tp.collect.datasets import load_settings
+from tp.collect.qa import run_qa
 from tp.collect.scheduler import Scheduler
 from tp.collect.sources import build_sources
 from tp.collect.state import State
@@ -28,6 +29,9 @@ def _build_parser() -> argparse.ArgumentParser:
     once.add_argument("source")
     qa = sub.add_parser("qa", help="run the data quality checks")
     qa.add_argument("--date", type=date.fromisoformat, help="YYYY-MM-DD; checks as of the end of that day (UTC)")
+    qa.add_argument(
+        "--full", action="store_true", help="scan all price history for holes and jumps; informational, never fails"
+    )
     sub.add_parser("status", help="show each source's last success, failures and next due time")
     return parser
 
@@ -94,16 +98,9 @@ def _status() -> int:
     return 0
 
 
-def _qa(day: date | None) -> int:
-    try:
-        from tp.collect.qa import run_qa
-    except ModuleNotFoundError as e:
-        if e.name != "tp.collect.qa":
-            raise
-        print("QA is not implemented yet", file=sys.stderr)
-        return 1
+def _qa(day: date | None, full: bool) -> int:
     now = datetime.combine(day, time(23, 59, 59), tzinfo=timezone.utc) if day else _now()
-    report = run_qa(now, State.load(), load_settings())
+    report = run_qa(now, State.load(), load_settings(), full=full)
     print(json.dumps(report, indent=2))
     failed = any(
         not check["ok"] for src in report["sources"].values() for check in src["checks"].values()
@@ -118,5 +115,5 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "once":
         return _once(args.source)
     if args.command == "qa":
-        return _qa(args.date)
+        return _qa(args.date, args.full)
     return _status()

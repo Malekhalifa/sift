@@ -4,6 +4,11 @@
 [metrics]
 port = 9120
 
+# Acknowledged price events, "SYMBOL:YYYY-MM-DD": a real split-less move or a known hole that QA should stop flagging.
+[qa]
+ignore_jumps = []
+ignore_gaps = []
+
 [apify]
 monthly_cap_usd = 4.0
 daily_run_cap_usd = 0.05

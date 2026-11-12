@@ -249,23 +249,17 @@ def test_unknown_source_name_exits_with_a_message(registry, capsys):
     assert registry[0].calls == 0
 
 
-def test_qa_without_the_qa_module_says_so_and_exits_one(registry, capsys, monkeypatch):
-    monkeypatch.setitem(__import__("sys").modules, "tp.collect.qa", None)
-    assert cli.main(["qa"]) == 1
-    assert "not implemented" in capsys.readouterr().err.lower()
-
-
 def test_qa_calls_run_qa_with_the_requested_date(registry, capsys, monkeypatch):
-    import sys
-    import types
-
     calls = []
 
-    def run_qa(now, state, settings):
-        calls.append(now)
+    def run_qa(now, state, settings, full=False):
+        calls.append((now, full))
         return {"date": "2026-03-01", "sources": {"alpha": {"checks": {"freshness": {"ok": True, "detail": ""}}}}}
 
-    monkeypatch.setitem(sys.modules, "tp.collect.qa", types.SimpleNamespace(run_qa=run_qa))
+    monkeypatch.setattr(cli, "run_qa", run_qa)
     assert cli.main(["qa", "--date", "2026-03-01"]) == 0
-    assert calls[0].date().isoformat() == "2026-03-01"
-    assert calls[0].tzinfo is not None
+    assert calls[0][0].date().isoformat() == "2026-03-01"
+    assert calls[0][0].tzinfo is not None
+    assert calls[0][1] is False
+    assert cli.main(["qa", "--full"]) == 0
+    assert calls[1][1] is True
