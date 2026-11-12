@@ -116,3 +116,54 @@ def test_composite_key_and_legacy_file_without_ingested_at(tmp_path):
     assert len(df) == 3
     assert df["ingested_at"].isna().sum() == 2
     assert df.loc[df["a"] == "y", "ingested_at"].item() == pd.Timestamp(NOW)
+
+
+def _legacy(tmp_path, tz):
+    ds = Dataset(name="l", path=tmp_path / "l.parquet", key=("date", "symbol"), ts_col="date")
+    dates = pd.to_datetime(["2024-01-01", "2024-01-02"]).tz_localize(tz).as_unit("us")
+    pd.DataFrame({"date": dates, "symbol": ["A", "A"], "v": [1, 2]}).to_parquet(ds.path)
+    return ds
+
+
+def test_naive_legacy_file_with_aware_new_frame_replaces_row(tmp_path):
+    ds = _legacy(tmp_path, None)
+    new = pd.DataFrame({"date": pd.to_datetime(["2024-01-02", "2024-01-03"], utc=True), "symbol": ["A", "A"], "v": [20, 3]})
+    assert store.write(ds, new, now=NOW) == 1
+    df = pd.read_parquet(ds.path)
+    assert list(df["v"]) == [1, 20, 3]
+    assert df["date"].dt.tz is None
+    assert not df.duplicated(["date", "symbol"]).any()
+
+
+def test_aware_legacy_file_with_naive_new_frame_replaces_row(tmp_path):
+    ds = _legacy(tmp_path, "UTC")
+    new = pd.DataFrame({"date": pd.to_datetime(["2024-01-02", "2024-01-03"]), "symbol": ["A", "A"], "v": [20, 3]})
+    assert store.write(ds, new, now=NOW) == 1
+    df = pd.read_parquet(ds.path)
+    assert list(df["v"]) == [1, 20, 3]
+    assert str(df["date"].dt.tz) == "UTC"
+
+
+def test_incompatible_dtype_raises_store_error_naming_column(tmp_path):
+    ds = _legacy(tmp_path, None)
+    before = ds.path.read_bytes()
+    new = pd.DataFrame({"date": [datetime(2024, 1, 2).date()], "symbol": ["A"], "v": [20]})
+    with pytest.raises(StoreError, match="date"):
+        store.write(ds, new, now=NOW)
+    assert ds.path.read_bytes() == before
+
+
+def test_nat_timestamps_are_dropped_and_logged(ds, caplog):
+    frame = rows((1, "2024-01-01", 1), (2, "2024-01-02", 2))
+    frame.loc[1, "ts"] = pd.NaT
+    with caplog.at_level(logging.WARNING):
+        assert store.write(ds, frame, now=NOW) == 1
+    assert list(stored(ds)["id"]) == [1]
+    assert "NaT" in caplog.text
+
+
+def test_old_file_missing_key_columns_raises_store_error(ds):
+    ds.path.parent.mkdir(parents=True)
+    pd.DataFrame({"other": [1]}).to_parquet(ds.path)
+    with pytest.raises(StoreError, match="id"):
+        store.write(ds, rows((1, "2024-01-01", 1)), now=NOW)

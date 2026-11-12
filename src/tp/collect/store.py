@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
+from pandas.api.types import is_datetime64_any_dtype
 
 from tp import config
 from tp.collect.datasets import Dataset
@@ -37,6 +38,27 @@ def _keys(df: pd.DataFrame, key: list[str]) -> pd.Index:
     return pd.MultiIndex.from_frame(df[key]) if len(key) > 1 else pd.Index(df[key[0]])
 
 
+def _align(ds: Dataset, old: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
+    """Coerce the new frame's key and ts columns to the stored dtypes so merged keys compare equal."""
+    cols = [*ds.key, ds.ts_col]
+    absent = [c for c in cols if c not in old.columns]
+    if absent:
+        raise StoreError(f"{ds.name}: stored file {ds.path} lacks columns {absent}")
+    new = new.copy()
+    for col in dict.fromkeys(cols):
+        o, n = old[col], new[col]
+        o_dt, n_dt = is_datetime64_any_dtype(o.dtype), is_datetime64_any_dtype(n.dtype)
+        if not (o_dt or n_dt):
+            continue
+        if not (o_dt and n_dt):
+            raise StoreError(f"{ds.name}: column {col!r} is {n.dtype} in the new frame but {o.dtype} in the stored file")
+        if o.dt.tz is None:
+            new[col] = n if n.dt.tz is None else n.dt.tz_convert("UTC").dt.tz_localize(None)
+        else:
+            new[col] = n.dt.tz_localize("UTC") if n.dt.tz is None else n.dt.tz_convert(o.dt.tz)
+    return new
+
+
 def _load(ds: Dataset) -> pd.DataFrame | None:
     if not ds.path.exists():
         return None
@@ -65,16 +87,21 @@ def write(ds: Dataset, frame: pd.DataFrame, now: datetime | None = None) -> int:
     missing = [c for c in (*ds.key, ds.ts_col) if c not in frame.columns]
     if missing:
         raise ValueError(f"{ds.name}: frame lacks columns {missing}")
-    future = _ts(frame[ds.ts_col]) > now_ts + FUTURE_SLACK
+    ts = _ts(frame[ds.ts_col])
+    if ts.isna().any():
+        log.warning("%s: dropping %d rows with NaT %s", ds.name, int(ts.isna().sum()), ds.ts_col)
+    future = ts > now_ts + FUTURE_SLACK
     if future.any():
         log.warning("%s: dropping %d rows with future %s", ds.name, int(future.sum()), ds.ts_col)
-        frame = frame[~future]
-        if frame.empty:
-            return 0
+    frame = frame[ts.notna() & ~future]
+    if frame.empty:
+        return 0
 
     key = list(ds.key)
     new = frame.assign(**{INGESTED_AT: now_ts})
     old = _load(ds)
+    if old is not None:
+        new = _align(ds, old, new)
     merged = new if old is None else pd.concat([old, new], ignore_index=True)
     merged = merged.drop_duplicates(key, keep="last")
     merged = merged.sort_values(ds.ts_col, kind="stable", key=_ts).reset_index(drop=True)
@@ -99,7 +126,7 @@ def read(
     until: pd.Timestamp | None = None,
     holdout: bool = False,
 ) -> pd.DataFrame:
-    """Rows with since <= ts_col <= until. Raises HoldoutError if the read reaches the holdout and holdout is False."""
+    """Rows with since <= ts_col <= until (both inclusive, unlike bars.load_raw where end is exclusive). Raises HoldoutError if the read reaches the holdout and holdout is False."""
     df = _load(ds)
     if df is None:
         return pd.DataFrame()
