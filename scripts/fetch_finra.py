@@ -18,10 +18,24 @@ import httpx
 import pandas as pd
 
 from tp import config
+from tp.collect import daemon
 from tp.collect.sources.finra import FIRST, fetch_day, merge_shortvol, write_days
+from tp.collect.sources.sec import atomic_parquet
+
+
+def collector_running() -> bool:
+    """True while a recorder daemon holds the data directory's lock (probed without blocking, released at once)."""
+    try:
+        daemon.acquire_lock(daemon.lock_path()).close()
+    except daemon.AlreadyRunning:
+        return True
+    return False
 
 
 def main() -> int:
+    if collector_running():
+        print(f"the recorder daemon is running ({daemon.lock_path()} is locked); stop it before rebuilding shortvol.parquet", file=sys.stderr)
+        return 2
     folder = config.DATA_DIR / "finra"
     daily = folder / "daily"
     daily.mkdir(parents=True, exist_ok=True)
@@ -45,7 +59,7 @@ def main() -> int:
     stored = folder / "shortvol.parquet"
     if stored.exists():  # keep what the recorder added (ingested_at, survivorship-free symbols)
         out = merge_shortvol(pd.read_parquet(stored), out)
-    out.to_parquet(stored, index=False)
+    atomic_parquet(out, stored)
     print(f"{len(out):,} rows, {out['symbol'].nunique()} symbols, {out['date'].nunique()} days, {out['date'].min():%Y-%m-%d} to {out['date'].max():%Y-%m-%d}; {len(known_gaps)} days without a file")
     return 0
 
