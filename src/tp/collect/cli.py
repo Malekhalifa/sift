@@ -97,7 +97,9 @@ def _status() -> int:
 def _qa(day: date | None) -> int:
     try:
         from tp.collect.qa import run_qa
-    except ImportError:
+    except ModuleNotFoundError as e:
+        if e.name != "tp.collect.qa":
+            raise
         print("QA is not implemented yet", file=sys.stderr)
         return 1
     now = datetime.combine(day, time(23, 59, 59), tzinfo=timezone.utc) if day else _now()
