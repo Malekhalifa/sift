@@ -32,6 +32,11 @@ class Metrics:
         self._httpd = None
         self.server_address: tuple[str, int] | None = None
 
+    def init_source(self, source: str) -> None:
+        """Create the row and error series at 0 so increase() sees a source's first error."""
+        self._rows.labels(source)
+        self._errors.labels(source)
+
     def record_run(self, result: RunResult) -> None:
         """Count a finished run: rows for a success, one error for a failure."""
         self._run_seconds.labels(result.source).observe(result.seconds)

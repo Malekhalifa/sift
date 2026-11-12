@@ -77,6 +77,11 @@ class Scheduler:
         batches = await asyncio.gather(*(self._run_group(g, ss) for g, ss in groups.items()))
         return [r for batch in batches for r in batch]
 
+    async def run_now(self, source: Source) -> RunResult:
+        """Run one source immediately, whether or not it is due, serialised within its rate group."""
+        async with self._locks.setdefault(source.rate_group, asyncio.Lock()):
+            return await self._run_one(source)
+
     async def _run_group(self, group: str, sources: list[Source]) -> list[RunResult]:
         results: list[RunResult] = []
         lock = self._locks.setdefault(group, asyncio.Lock())
