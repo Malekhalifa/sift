@@ -209,7 +209,8 @@ def test_shortvol_frame_merges_into_the_legacy_file_dtypes():
 def test_shortvol_without_a_stored_file_starts_at_the_first_consolidated_day(monkeypatch):
     monkeypatch.setattr(finra, "FIRST", date(2026, 11, 9))
     http = FakeHttp({})
-    shortvol(http).run(ctx())
+    with pytest.raises(SourceError, match="nothing is stored"):
+        shortvol(http).run(ctx())
     assert http.urls == [sv_url(d) for d in ("20261109", "20261110", "20261111")]
 
 
@@ -283,7 +284,8 @@ def test_shortvol_a_block_is_not_recorded_by_the_retry_that_follows_the_breaker(
     assert pd.read_parquet(datasets.dataset("finra_shortvol").path)["date"].max() == pd.Timestamp("2026-10-02")
     for _ in range(2):  # the retry starts inside the streak, with the block still on
         retry = FakeHttp({})
-        shortvol(retry).run(ctx())
+        with pytest.raises(SourceError, match="no file could be read"):  # the block is still on and the store is stale
+            shortvol(retry).run(ctx())
         assert retry.urls[0] == sv_url("20261005")
         assert gaps("no_file.txt") == set()
 
@@ -355,6 +357,30 @@ def test_shortvol_never_asks_for_today_even_after_the_schedule():
     http = FakeHttp({sv_url("20261112"): sv_text("20261112")})
     shortvol(http).run(late)
     assert http.urls == []
+
+
+def test_shortvol_outage_from_the_start_with_a_stale_store_is_an_error():
+    store_through("20261030", first="20261026")  # newest stored day is 8 weekdays before yesterday
+    http = FakeHttp({})
+    with pytest.raises(SourceError, match=r"newest stored day is 13 days old") as e:
+        shortvol(http).run(ctx())
+    assert not isinstance(e.value, RateLimited)
+    assert len(http.urls) == 8
+    assert gaps("no_file.txt") == set()
+
+
+def test_shortvol_outage_with_a_fresh_store_is_a_quiet_success():
+    store_through("20261110")  # yesterday's file is not up yet; the newest stored day is one weekday old
+    http = FakeHttp({})
+    assert shortvol(http).run(ctx()) == 0
+    assert http.urls == [sv_url("20261111")]
+    assert gaps("no_file.txt") == set()
+
+
+def test_shortvol_outage_error_is_raised_by_fetch_too():
+    store_through("20261030", first="20261026")
+    with pytest.raises(SourceError, match="no file could be read"):
+        shortvol(FakeHttp({})).fetch(ctx())
 
 
 def test_universe_includes_survivorship_free_symbols_and_the_index_etfs():
@@ -494,7 +520,8 @@ def test_short_interest_three_missing_dates_before_a_hit_are_not_recorded(monkey
     interest(serve(JAN_FEB[3])).run(ctx())
     assert gaps("short_interest_no_file.txt") == set()
     again = serve()
-    interest(again).run(ctx())
+    with pytest.raises(SourceError, match="no file could be read"):
+        interest(again).run(ctx())
     assert len(again.urls) == 12  # all three are asked for again (four candidate days each)
 
 
@@ -528,8 +555,34 @@ def test_short_interest_breaker_retry_inside_the_streak_records_nothing(monkeypa
     with pytest.raises(SourceError):
         interest(serve(JAN_FEB[0])).run(ctx())
     for _ in range(2):
-        interest(FakeHttp({})).run(ctx())  # no hit in the run: no error, and nothing is recorded
+        with pytest.raises(SourceError, match="no file could be read"):  # no hit in the run and the store is stale
+            interest(FakeHttp({})).run(ctx())
         assert gaps("short_interest_no_file.txt") == set()
+
+
+def test_short_interest_outage_with_nothing_stored_is_an_error(from_sep):
+    with pytest.raises(SourceError, match="nothing is stored") as e:
+        interest(FakeHttp({})).run(ctx())
+    assert not isinstance(e.value, RateLimited)
+    assert gaps("short_interest_no_file.txt") == set()
+
+
+def test_short_interest_outage_with_a_stale_store_is_an_error(monkeypatch):
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(date(2026, 9, 30), date(2026, 10, 15)))
+    interest(serve(date(2026, 9, 30))).run(ctx())  # newest stored is 30 business days old
+    with pytest.raises(SourceError, match=r"newest stored settlement is 43 days old"):
+        interest(FakeHttp({})).run(ctx())
+    assert gaps("short_interest_no_file.txt") == set()
+
+
+def test_short_interest_outage_with_a_fresh_store_is_a_quiet_success(monkeypatch):
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(date(2026, 10, 15)))
+    interest(serve(date(2026, 10, 15))).run(ctx())  # 20 business days old
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(date(2026, 10, 15), date(2026, 10, 28)))
+    http = FakeHttp({})
+    assert interest(http).run(ctx()) == 0
+    assert http.urls  # 10/28 was asked for
+    assert gaps("short_interest_no_file.txt") == set()
 
 
 def test_short_interest_writer_errors_propagate_unchanged(from_sep, monkeypatch):

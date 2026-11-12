@@ -266,6 +266,13 @@ def _stored_dates(ds: Dataset, column: str) -> set[date]:
     return set() if stored is None else {t.date() for t in pd.to_datetime(stored).dropna().unique()}
 
 
+def _nothing_read(what: str, newest: date | None, today: date) -> SourceError:
+    return SourceError(
+        "FINRA: no file could be read and "
+        + ("nothing is stored" if newest is None else f"the newest stored {what} is {(today - newest).days} days old")
+    )
+
+
 class FinraShortVolume(_FinraSource):
     """Daily short volume for the universe. Each run probes every weekday from the first stored date up to yesterday (ET)
     that is neither stored nor a trusted no-file day, so a file is never asked for before FINRA has had a day to post it, and
@@ -338,6 +345,11 @@ class FinraShortVolume(_FinraSource):
                 write_days(_no_file_path(), updated)
         log.info("finra_shortvol: %d days asked for, %d read, %d without a file", len(days), len(parts), len(confirmed))
         if not parts:
+            if error is None:
+                newest = max(have, default=None)
+                last_weekday = _weekday_on_or_before(today - timedelta(days=1))
+                if newest is None or int(np.busday_count(newest, last_weekday)) > SHORTVOL_STREAK:
+                    error = _nothing_read("day", newest, today)
             return _empty_shortvol(), error
         frame = pd.concat(parts, ignore_index=True)
         frame["date"] = frame["date"].astype("datetime64[us]")
@@ -447,4 +459,8 @@ class FinraShortInterest(_FinraSource):
             if absent:
                 write_days(_short_interest_no_file_path(), known | absent)
         log.info("finra_short_interest: %d settlement dates due, %d files read", len(due), read)
+        if not read and not parts and tried_days and error is None:
+            newest = max(_stored_dates(self.datasets[0], "settlement_date"), default=None)
+            if newest is None or int(np.busday_count(newest, today)) > STALE_AGE_BUSINESS_DAYS:
+                error = _nothing_read("settlement", newest, today)
         return (pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()), error
