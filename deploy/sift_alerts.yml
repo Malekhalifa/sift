@@ -1,0 +1,72 @@
+# Prometheus alert rules for the Sift recorder (tp.collect). The daemon serves metrics on 127.0.0.1:9120; the scrape
+# job must be named "sift" (see docs/recorder-runbook.md for the prometheus.yml wiring).
+#
+# Interplay with SiftTargetDown: when the daemon is stopped, every sift_* series goes stale and its alert resolves, so
+# only SiftTargetDown (critical) pages. SiftQaStale is gated on up{job="sift"} == 1 so its absent() branch cannot
+# double-page in that case.
+groups:
+  - name: sift
+    rules:
+      - alert: SiftSourceStale
+        expr: sift_source_last_success_age_seconds > on(source) sift_source_stale_after_seconds
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sift source {{ $labels.source }} is stale"
+          description: "{{ $labels.source }} last succeeded {{ $value | humanizeDuration }} ago, past its allowed age. Run `python -m tp.collect status` and check data/logs/collect-recorder.log."
+
+      - alert: SiftSourceErrors
+        expr: increase(sift_source_errors_total[1h]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sift source {{ $labels.source }} failed more than 3 times in an hour"
+          description: "{{ $labels.source }} had {{ $value | humanize }} failed runs in the last hour. Read the error lines in data/logs/collect-recorder.log."
+
+      - alert: SiftQaFailing
+        expr: sift_qa_failures > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sift QA check {{ $labels.check }} fails for {{ $labels.source }}"
+          description: "{{ $labels.source }} fails {{ $labels.check }}. Open the newest report in data/qa/ for the offending rows."
+
+      - alert: SiftQaStale
+        expr: |
+          (sift_qa_report_age_seconds > 2 * 86400 or absent(sift_qa_report_age_seconds))
+          and on() up{job="sift"} == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No fresh Sift QA report"
+          description: "The newest scheduled QA report in data/qa/ is over two days old, or none exists yet. Check `launchctl print gui/$(id -u)/com.sift.qa` and data/logs/collect-qa.log. This is expected for the first day after install, until 06:15 has passed once."
+
+      - alert: SiftDiskLow
+        expr: sift_disk_free_bytes < 10e9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Less than 10 GB free on the Sift data volume"
+          description: "{{ $value | humanize1024 }}B free where data/ lives. Free space or move the data directory before the recorder fails to write."
+
+      - alert: SiftTargetDown
+        expr: up{job="sift"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The Sift recorder is down"
+          description: "Prometheus cannot scrape 127.0.0.1:9120. Run `uv run python -m tp.collect.tools.local_stack status`; launchd restarts the daemon unless it was stopped or keeps crashing (see data/logs/collect-recorder.log)."
+
+      - alert: SiftApifySpendHigh
+        expr: sift_apify_spend_usd_month > 4.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Apify spend this month is over $4"
+          description: "Spend is ${{ $value | humanize }} of the $5 monthly credit. Disable congress_trades in config/collect.toml and check the Apify console."

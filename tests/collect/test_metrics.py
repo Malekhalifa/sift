@@ -4,6 +4,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import yaml
 from prometheus_client import CollectorRegistry, generate_latest
 
 from tp.collect.metrics import Metrics
@@ -172,7 +173,9 @@ def test_metric_names_match_the_alert_rules(metrics, registry):
     metrics.set_disk_free(0)
     metrics.set_apify_spend(0)
     exported = set(re.findall(r"^(sift_\w+?)(?:\{| )", generate_latest(registry).decode(), re.M))
-    used = set(re.findall(r"\bsift_[a-z_]+", ALERTS.read_text()))
-    used -= {n for n in used if n.startswith("sift_alerts")}
-    missing = {n for n in used if n not in exported and n.removesuffix("_bucket") not in exported}
+    doc = yaml.safe_load(ALERTS.read_text())
+    exprs = [rule["expr"] for group in doc["groups"] for rule in group["rules"]]
+    used = {n for expr in exprs for n in re.findall(r"\bsift_[a-z0-9_]+", re.sub(r'"[^"]*"', '""', expr))}
+    assert used, "no sift_* metric found in any alert expr"
+    missing = used - exported
     assert not missing, f"alert rules use metrics the recorder does not export: {sorted(missing)}"
