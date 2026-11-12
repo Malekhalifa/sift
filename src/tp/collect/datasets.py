@@ -37,7 +37,7 @@ _SPECS: dict[str, tuple[Callable[[], Path], tuple[str, ...], str]] = {
     "sp500_changes": (
         _under("store", "sp500_changes.parquet"), ("effective_date", "added", "removed"), "effective_date",
     ),
-    "wikipedia_pageviews": (_under("store", "wikipedia_pageviews.parquet"), ("date", "article"), "date"),
+    "wikipedia_pageviews": (_under("store", "wikipedia_pageviews.parquet"), ("date", "symbol", "article"), "date"),
     "congress_trades": (_under("store", "congress_trades.parquet"), ("source_id",), "ts"),
 }
 

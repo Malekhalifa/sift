@@ -8,7 +8,6 @@ company-facts reads are shared with scripts/fetch_insider.py and scripts/fetch_s
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import os
 import time
@@ -33,6 +32,7 @@ from tp.collect.source import (
     SourceError,
     parse_schedule,
 )
+from tp.collect.sources.progress import load_progress, save_progress
 from tp.edgar import (
     EdgarBadResponse,
     EdgarBlocked,
@@ -86,29 +86,6 @@ def progress_path() -> Path:
     return config.DATA_DIR / "collect" / "sec_filings_progress.json"
 
 
-def _load_progress(path: Path, field: str, day: str) -> dict:
-    """What this run date already finished (`field` lists the done items), so a retry after a rate limit resumes."""
-    fresh = {"date": day, "tickers": False, field: []}
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return fresh
-    if not isinstance(data, dict) or data.get("date") != day or not isinstance(data.get(field), list):
-        return fresh
-    return {"date": day, "tickers": bool(data.get("tickers")), field: data[field]}
-
-
-def _save_progress(path: Path, progress: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        tmp.write_text(json.dumps(progress))
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
 def _listed(pages: list[dict], symbol: str) -> bool:
     """False when the submissions JSON carries a ticker list that no longer includes the symbol (reused ticker)."""
     tickers = pages[0].get("tickers")
@@ -133,7 +110,7 @@ class SecFilings(Source):
     def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
         symbols = universe_symbols()
         client = self._client_factory()
-        progress = _load_progress(progress_path(), "ciks", _ny_day(ctx.now))
+        progress = load_progress(progress_path(), "ciks", _ny_day(ctx.now), ("tickers",))
         done = set(progress["ciks"])
         resumed = len(done)
         parts: dict[str, list[pd.DataFrame]] = {n: [] for n in COLUMNS}
@@ -142,7 +119,7 @@ class SecFilings(Source):
             cik_of = client.ticker_map(refresh=not progress["tickers"])
             if not progress["tickers"]:
                 progress["tickers"] = True
-                _save_progress(progress_path(), progress)
+                save_progress(progress_path(), progress)
             for sym in symbols:
                 cik = cik_of.get(sym)
                 if cik is None:
@@ -152,7 +129,7 @@ class SecFilings(Source):
                 if cik not in done:
                     done.add(cik)
                     progress["ciks"] = sorted(done)
-                    _save_progress(progress_path(), progress)
+                    save_progress(progress_path(), progress)
                 if not _listed(pages, sym):
                     skipped.append(sym)
                     continue
@@ -373,12 +350,12 @@ class SecXbrlShares(Source):
             ctx.writer(self.datasets[0], frame)
         done.update(fetched)
         progress["symbols"] = sorted(done)
-        _save_progress(xbrl_progress_path(), progress)
+        save_progress(xbrl_progress_path(), progress)
 
     def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
         symbols = xbrl_symbols()
         client = self._client_factory()
-        progress = _load_progress(xbrl_progress_path(), "symbols", _ny_day(ctx.now))
+        progress = load_progress(xbrl_progress_path(), "symbols", _ny_day(ctx.now), ("tickers",))
         done = set(progress["symbols"])
         resumed = len(done)
         parts: list[pd.DataFrame] = []
@@ -388,7 +365,7 @@ class SecXbrlShares(Source):
             cik_of = client.ticker_map(refresh=not progress["tickers"])
             if not progress["tickers"]:
                 progress["tickers"] = True
-                _save_progress(xbrl_progress_path(), progress)
+                save_progress(xbrl_progress_path(), progress)
             for sym in symbols:
                 if sym in done:
                     continue

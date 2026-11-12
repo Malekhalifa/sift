@@ -7,6 +7,7 @@ from tp.collect.sources.finra import FinraShortInterest, FinraShortVolume
 from tp.collect.sources.political import DodAwards, TrumpPosts
 from tp.collect.sources.sec import SecFilings, SecForm4, SecXbrlShares
 from tp.collect.sources.sp500 import Sp500Changes
+from tp.collect.sources.wikipedia import WikipediaPageviews
 
 
 def source_settings(settings: dict, name: str) -> dict:
@@ -17,24 +18,25 @@ def source_settings(settings: dict, name: str) -> dict:
     return table
 
 
+REGISTRY: tuple[tuple[str, type[Source]], ...] = (
+    ("alpaca_bars", AlpacaBars),
+    ("sec_filings", SecFilings),
+    ("sec_form4", SecForm4),
+    ("sec_xbrl_shares", SecXbrlShares),
+    ("finra_shortvol", FinraShortVolume),
+    ("finra_short_interest", FinraShortInterest),
+    ("dod_awards", DodAwards),
+    ("trump_posts", TrumpPosts),
+    ("sp500_changes", Sp500Changes),
+    ("wikipedia_pageviews", WikipediaPageviews),
+)
+
+
 def build_sources(settings: dict) -> list[Source]:
+    """Every registered source built from its settings table, except those whose table says `enabled = false`."""
     sources: list[Source] = []
-    cfg = source_settings(settings, "alpaca_bars")
-    sources.append(AlpacaBars(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "sec_filings")
-    sources.append(SecFilings(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "sec_form4")
-    sources.append(SecForm4(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "sec_xbrl_shares")
-    sources.append(SecXbrlShares(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "finra_shortvol")
-    sources.append(FinraShortVolume(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "finra_short_interest")
-    sources.append(FinraShortInterest(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "dod_awards")
-    sources.append(DodAwards(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "trump_posts")
-    sources.append(TrumpPosts(cfg["schedule"], cfg["lag_minutes"]))
-    cfg = source_settings(settings, "sp500_changes")
-    sources.append(Sp500Changes(cfg["schedule"], cfg["lag_minutes"]))
+    for name, cls in REGISTRY:
+        cfg = source_settings(settings, name)
+        if cfg.get("enabled", True):
+            sources.append(cls(cfg["schedule"], cfg["lag_minutes"]))
     return sources

@@ -52,6 +52,8 @@ lag_minutes = 0
 [sources.wikipedia_pageviews]
 schedule = "daily 06:30 UTC"
 lag_minutes = 0
+# Off until config/wikipedia_articles.toml has been reviewed (scripts/build_wikipedia_map.py proposes candidates).
+enabled = false
 
 [sources.congress_trades]
 schedule = "daily 08:30 America/New_York"

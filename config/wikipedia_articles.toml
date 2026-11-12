@@ -1,0 +1,5 @@
+# Reviewed map, one SYMBOL = "Article_Title" per line; the source ignores symbols without an entry.
+# Build candidates with scripts/build_wikipedia_map.py (writes wikipedia_articles.candidates.toml), review them by hand,
+# then copy the accepted lines under [articles] below.
+
+[articles]

@@ -19,6 +19,7 @@ SETTINGS = {"sources": {
     "dod_awards": {"schedule": "weekly mon 06:00 America/New_York", "lag_minutes": 0},
     "trump_posts": {"schedule": "daily 07:00 America/New_York", "lag_minutes": 0},
     "sp500_changes": {"schedule": "weekly sun 10:00 America/New_York", "lag_minutes": 0},
+    "wikipedia_pageviews": {"schedule": "daily 06:30 UTC", "lag_minutes": 0},
 }}
 
 
