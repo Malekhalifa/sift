@@ -20,13 +20,16 @@ def month_starts(index: pd.DatetimeIndex) -> list[int]:
     return [i for i in range(len(index)) if i == 0 or months[i] != months[i - 1]]
 
 
-def monthly_spread(open_: pd.DataFrame, close: pd.DataFrame, market_open: pd.Series, first_rebalance: str) -> pd.DataFrame:
+def monthly_spread(open_: pd.DataFrame, close: pd.DataFrame, market_open: pd.Series, first_rebalance: str,
+                   signal: pd.DataFrame | None = None) -> pd.DataFrame:
     """One row per month: long-short net return, legs, cost, turnover, market return.
 
     Signal = nearness at the previous session's close; trade at the first session's open of the month; hold to the next
     month's first-session open. Quintile size is round(ranked / 5). Only months whose exit open exists are returned.
+    `signal` (same shape as open_, known at each session's close; highest is longed) replaces nearness to the high, so
+    other cross-sectional ideas (M16) reuse the same basket, cost and timing rules.
     """
-    near = nearness(close)
+    near = nearness(close) if signal is None else signal
     starts = month_starts(open_.index)
     rows, prev = [], {}
     for k, pos in enumerate(starts[:-1]):
