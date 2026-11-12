@@ -9,7 +9,7 @@
 A pre-registered research pipeline that tests short-term US stock strategies on free data,<br>
 and catches the ideas that only look like they work.
 
-![tests](https://img.shields.io/badge/tests-208%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-872%20passing-2ea44f)
 ![python](https://img.shields.io/badge/python-3.12%2B-3776ab)
 ![status](https://img.shields.io/badge/status-research%20complete-1f4e79)
 ![holdout](https://img.shields.io/badge/2025%2B%20holdout-untouched-d95f02)
@@ -33,16 +33,17 @@ which ideas, if any, survive a test that is built to catch both, starting from $
 the result with checks designed to catch luck. The rule is simple: **no real money until an idea has proved itself on data it
 was not tuned on.** The name is the method: put each idea on a sieve and see what stays behind.
 
-**Result.** Twelve ideas were tested. None passed. Several looked like winners until the market's rise was subtracted, or until
-they were repeated on stocks they had never seen. No money was traded.
+**Result.** Seventeen ideas were tested. None passed. Several looked like winners until the market's rise was subtracted, or until
+they were repeated on stocks they had never seen. No money was traded. Since the first twelve, a forward data recorder
+was built (so the free data keeps growing) and five more pre-registered tests were run on new free data (M14 to M18); they all failed too.
 
 <p align="center">
-  <img src="docs/img/forest.svg" alt="Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals" width="900">
+  <img src="docs/img/forest.svg" alt="Out-of-sample expectancy per trade for the first twelve ideas, with 95% confidence intervals" width="900">
 </p>
 
-<sub>Dot = result after costs, line = 95% confidence interval, zero = no edge. Red diamond = after subtracting what simply holding the market earned. R = profit in units of the amount risked per trade.</sub>
+<sub>Chart covers the first twelve ideas (M4 to M12); M14 to M18 are monthly baskets and event studies, listed below. Dot = result after costs, line = 95% confidence interval, zero = no edge. Red diamond = after subtracting what simply holding the market earned. R = profit in units of the amount risked per trade.</sub>
 
-## The twelve ideas and what happened
+## The first twelve ideas and what happened
 
 Each idea is a belief about how prices behave. The test asks: acting on that belief with fixed rules, would it have made money
 after costs, and more than just holding the market?
@@ -63,7 +64,22 @@ after costs, and more than just holding the market?
 | 12 | High-volume continuation | The highest volume in weeks starts an upward drift | +0.100R ±0.019 | ⚠️ 5 of 7 checks, then **−0.039R** after the market |
 | – | 200-day trend filter on SPY | Holding the market only above its 200-day average is safer | 8.8% a year vs 12.8% | ⚖️ Worst drop −22% instead of −32%, at a price |
 
-The last row is a side question, not a trading idea. Full plain-language explanations are in the [report](docs/findings.md#2-the-twelve-ideas-in-plain-words).
+The last row is a side question, not a trading idea. Full plain-language explanations are in the [report](docs/findings.md#2-the-first-twelve-ideas-in-plain-words).
+
+### Five more tests on new free data (M14 to M18)
+
+Same rules of the game: protocol committed first, one frozen setting, run once, every run counted. These are cross-sectional
+monthly long-short baskets (top fifth minus bottom fifth, 5 bps a side) or event studies, so the unit is a percent, not R.
+
+| # | Idea | The belief, in plain words | Result | Verdict |
+|:-:|---|---|---|---|
+| M14 | 8-K bad-news items | A negative company filing keeps pushing the stock down | +0.09% ±0.32% per event (879 events) | ❌ Nothing left at the first open |
+| M15 | 52-week-high momentum | Stocks near their yearly high keep outperforming | −0.37% a month | ❌ Not eligible (replication needed a disclosed data fix) |
+| M16 | FINRA short-sale volume | Heavily shorted stocks underperform next month | +0.38% / +0.34% a month | ⚠️ Closest yet, but the 95% interval spans zero |
+| M17 | Net share issuance | Companies that issue shares underperform | −0.22% / +0.18% a month | ❌ Not eligible |
+| M18 | Lazy Prices (10-K risk-factor text) | A company that rewrites its risk factors is warning of trouble | +0.25% / +0.12% a month, 45 months | ➖ Inconclusive (too few months, not close to a pass) |
+
+Where two numbers appear, they are the primary universe and the unseen replication. Details: [docs/research-workflow.md](docs/research-workflow.md).
 
 ## How it works
 
@@ -86,7 +102,7 @@ flowchart TD
 
 <sub>SEC = US Securities and Exchange Commission; EDGAR = its public filing database; Alpaca = a US broker whose free tier supplies the price data; walk-forward = settings chosen on earlier years, tested on later ones; holdout = recent data kept unseen until the end.</sub>
 
-1. **Data.** A recorder downloads free bars (Alpaca's free tier, back to 2016), SEC filings, government contract records and
+1. **Data.** A recorder downloads free bars (Alpaca's free tier, back to 2016), SEC filings, FINRA short volume, government contract records and
    public post archives into a local store. Stock splits are applied when data is read.
 2. **Strategies.** Each idea becomes exact rules that output signals: direction, entry, stop and a target at 1.5 times the risk.
 3. **Backtest engine.** It replays history with realistic fills (next-bar open plus slippage, stops win ties, gaps fill at the open)
@@ -95,8 +111,8 @@ flowchart TD
    replication on unseen stocks.
 5. **Paper trading.** A loop for a broker's paper account, built for the day an idea passes. None did.
 
-**Tech stack:** Python 3.12+ with `uv`, pandas and Parquet for a split-safe bar store, Alpaca's free market-data tier, SEC EDGAR,
-USAspending.gov, a SQLite trial registry, pytest, and Mermaid and LaTeX (XeLaTeX) for the whitepaper.
+**Tech stack:** Python 3.12+ with `uv`, pandas and Parquet for a split-safe bar store, Alpaca's free market-data tier, SEC EDGAR, FINRA,
+USAspending.gov, asyncio, Prometheus and launchd for the recorder, a SQLite trial registry, pytest, and Mermaid and LaTeX (XeLaTeX) for the whitepaper.
 
 ## How the tests stay honest
 
@@ -117,7 +133,7 @@ flowchart TD
 - **Pre-registration:** protocol, parameter grid and pass criteria are committed *before* each run. The git history proves the order.
 - **Walk-forward, out of sample:** parameters are chosen on earlier years and judged on the next (test years 2019 to 2024).
 - **Untouched holdout:** data from 2025 onward is refused by the code unless an explicit flag is passed. It has not been read.
-- **Every try is counted:** 298 configurations logged; the Deflated Sharpe Ratio asks whether a result survives that many attempts.
+- **Every try is counted:** 304 runs logged; the Deflated Sharpe Ratio asks whether a result survives that many attempts.
 - **Realistic fills and costs**, a **market-adjusted check**, and **replication on stocks that played no part in choosing the rule.**
 
 ## What I learned
@@ -125,7 +141,7 @@ flowchart TD
 <!-- diagram:verdicts -->
 ```mermaid
 flowchart LR
-  R[12 ideas tested] --> G1[No edge even before costs]
+  R[First 12 ideas tested] --> G1[No edge even before costs]
   R --> G2[The gain was the rising market]
   R --> G3[Did not replicate on new stocks]
   R --> G4[Nothing left after the first open]
@@ -168,6 +184,11 @@ Read the full write-up in the [whitepaper (PDF)](docs/Trading-Research-Findings.
 | M11 | Volume-dry-up reversal, high-volume continuation | [protocol](docs/m11-volume-protocol.md) | [results](docs/m11-volume-results.md) |
 | M12 | Presidential posts, Pentagon awards (event studies) | [protocol](docs/m12-political-protocol.md) | [results](docs/m12-political-results.md) |
 | M13 | 200-day trend filter on SPY | [protocol](docs/m13-trend-filter-protocol.md) | [results](docs/m13-trend-filter-results.md) |
+| M14 | 8-K bad-news items (event study) | [protocol](docs/m14-eightk-protocol.md) | [results](docs/m14-eightk-results.md) |
+| M15 | 52-week-high momentum | [protocol](docs/m15-high52-protocol.md) | [results](docs/m15-high52-results.md) |
+| M16 | FINRA short-sale volume | [protocol](docs/m16-shortvol-protocol.md) | [results](docs/m16-shortvol-results.md) |
+| M17 | Net share issuance | [protocol](docs/m17-issuance-protocol.md) | [results](docs/m17-issuance-results.md) |
+| M18 | Lazy Prices (10-K risk-factor text) | [protocol](docs/m18-lazyprices-protocol.md) | [results](docs/m18-lazyprices-results.md) |
 
 M0 to M3 and M5 are infrastructure: decisions, a data-depth probe, the recorder, the backtest engine and a paper-trading loop
 (plumbing only; nothing was run for evidence). A literature review that shaped M11 is in [docs/ideas/candle-strategies.md](docs/ideas/candle-strategies.md).
@@ -177,7 +198,7 @@ M0 to M3 and M5 are infrastructure: decisions, a data-depth probe, the recorder,
 ```sh
 uv sync
 cp .env.example .env        # fill in the Alpaca paper keys; .env is gitignored
-uv run pytest               # 208 tests
+uv run pytest               # 872 tests
 uv run python scripts/sweep.py --config config/sweeps/m10-insider.toml   # rerun one pre-registered sweep
 uv run python scripts/build_report.py                                    # rebuild the whitepaper PDF (needs XeLaTeX)
 ```
@@ -238,14 +259,14 @@ df = load_bars("NVDA", feed="sip", timeframe="1Min", rth=True, resample="5min") 
 
 Coarser bars are derived from 1-minute bars (`resample="5min"`), not stored separately.
 
-#### Daily schedule (parked)
+#### Daily schedule (parked, superseded by `tp.collect`)
 
 `ops/launchd/com.tradingpipeline.recorder.plist` runs the recorder daily at 03:00 local time (CET, which is
 21:00 ET, after the extended session and the SIP delay). If the Mac was asleep, launchd runs it on wake, and
 the recorder catches up on anything missed. Log: `data/logs/recorder.log`.
 
 **Currently parked** (unloaded; the installed copy is saved in `data/parked/`). To restart it, copy the plist from
-`ops/launchd/` into `~/Library/LaunchAgents/` and run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradingpipeline.recorder.plist`.
+`ops/launchd/` into `~/Library/LaunchAgents/` (replace the `/path/to/sift` placeholders with your checkout path first) and run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradingpipeline.recorder.plist`.
 A 403 problem that made every nightly request fail (the fetch end time reached past the free tier's 15-minute
 delay when the job ran after 20:30 ET) is fixed in `tp.recorder.fetch_end`.
 
@@ -287,7 +308,7 @@ Overfitting guards:
 - **Trial registry.** Every run is appended to `data/trials.sqlite`. The count per strategy feeds the Deflated Sharpe check.
 - **Holdout.** Data from `config.HOLDOUT_START` (2025-01-01) is refused unless `--use-holdout` is passed, and such runs are flagged. Keep it for the final validation only.
 
-Verification: the test suite (208 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
+Verification: the test suite (872 tests), plus an independent re-derivation of 300 random trades from raw bars with a separate loop (all matched).
 
 #### Baseline result (plumbing check, not a finding)
 
