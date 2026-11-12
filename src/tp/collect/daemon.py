@@ -6,12 +6,12 @@ import fcntl
 import logging
 import shutil
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import IO
 
 from tp import config
-from tp.collect import store
+from tp.collect import qa, store
 from tp.collect.metrics import Metrics
 from tp.collect.scheduler import Scheduler
 from tp.collect.source import Source
@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 TICK_SECONDS = 30
 STALE_AFTER_INTERVALS = 2
+QA_EXPORT_EVERY = timedelta(minutes=5)
 
 
 class AlreadyRunning(Exception):
@@ -85,13 +86,21 @@ async def run(
         for source in sources:
             metrics.init_source(source.name)
             metrics.set_stale_after(source.name, STALE_AFTER_INTERVALS * source.schedule.interval_seconds)
+        qa_exported: datetime | None = None
         while not stop.is_set():
             try:
                 for result in await scheduler.tick():
                     metrics.record_run(result)
             except Exception:
                 log.exception("scheduler tick failed")
-            _update_gauges(metrics, sources, state, clock(), started)
+            now = clock()
+            _update_gauges(metrics, sources, state, now, started)
+            if qa_exported is None or now - qa_exported >= QA_EXPORT_EVERY:
+                qa_exported = now
+                try:
+                    qa.export_latest(metrics)
+                except Exception:
+                    log.exception("cannot export the QA report")
             if stop.is_set():
                 break
             await _wait(sleep, stop)

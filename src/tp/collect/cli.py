@@ -1,4 +1,4 @@
-"""Command line for the recorder: run | once <source> | qa [--date] [--full] | status."""
+"""Command line for the recorder: run | once <source> | qa [--date] [--full] [--no-advance] | status."""
 from __future__ import annotations
 
 import argparse
@@ -30,7 +30,13 @@ def _build_parser() -> argparse.ArgumentParser:
     qa = sub.add_parser("qa", help="run the data quality checks")
     qa.add_argument("--date", type=date.fromisoformat, help="YYYY-MM-DD; checks as of the end of that day (UTC)")
     qa.add_argument(
-        "--full", action="store_true", help="scan all price history for holes and jumps; informational, never fails"
+        "--full", action="store_true",
+        help="scan all price history for holes and jumps (writes <date>-full.json); only price_jumps and "
+        "calendar_completeness are informational here, every other check still counts toward the exit status",
+    )
+    qa.add_argument(
+        "--no-advance", action="store_true",
+        help="manual inspection: change no schema baseline and write <date>-manual.json, not the day's report",
     )
     sub.add_parser("status", help="show each source's last success, failures and next due time")
     return parser
@@ -98,9 +104,9 @@ def _status() -> int:
     return 0
 
 
-def _qa(day: date | None, full: bool) -> int:
+def _qa(day: date | None, full: bool, advance_baseline: bool) -> int:
     now = datetime.combine(day, time(23, 59, 59), tzinfo=timezone.utc) if day else _now()
-    report = run_qa(now, State.load(), load_settings(), full=full)
+    report = run_qa(now, State.load(), load_settings(), full=full, advance_baseline=advance_baseline)
     print(json.dumps(report, indent=2))
     failed = any(
         not check["ok"] for src in report["sources"].values() for check in src["checks"].values()
@@ -115,5 +121,5 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "once":
         return _once(args.source)
     if args.command == "qa":
-        return _qa(args.date, args.full)
+        return _qa(args.date, args.full, not args.no_advance)
     return _status()

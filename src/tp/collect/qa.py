@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -140,12 +141,12 @@ def _future(ds, df: pd.DataFrame, now: datetime) -> _Check:
     return _fail(f"{len(late)} rows with {ds.ts_col} after {(now + FUTURE_SLACK).date()}, latest {late.max().date()}", len(late))
 
 
-def _schema(ds, df: pd.DataFrame, previous: dict[str, list[str]], unreadable: bool) -> _Check:
+def _schema(ds, df: pd.DataFrame, previous: dict[str, list[str]], unreadable: bool, advance: bool) -> _Check:
     cols = sorted(df.columns)
     if unreadable:
         return _fail("schema baseline unreadable")
     if ds.name not in previous:
-        return _pass("first run, schema recorded")
+        return _pass("first run, schema recorded" if advance else "no baseline yet, nothing recorded")
     before = set(previous[ds.name])
     removed, added = sorted(before - set(cols)), sorted(set(cols) - before)
     if not removed and not added:
@@ -177,12 +178,12 @@ def _row_count(df: pd.DataFrame, interval_s: int, now: datetime) -> _Check:
 
 
 def _dataset_checks(
-    ds, df: pd.DataFrame, interval_s: int, now: datetime, previous: dict, unreadable: bool
+    ds, df: pd.DataFrame, interval_s: int, now: datetime, previous: dict, unreadable: bool, advance: bool
 ) -> dict[str, _Check]:
     return {
         "duplicates": _duplicates(ds, df),
         "future_timestamps": _future(ds, df, now),
-        "schema": _schema(ds, df, previous, unreadable),
+        "schema": _schema(ds, df, previous, unreadable, advance),
         "row_count": _row_count(df, interval_s, now),
     }
 
@@ -216,7 +217,7 @@ def _dataset_source(
             continue
         if advance or unreadable or dname not in schemas:
             recorded[dname] = sorted(df.columns)
-        for check, result in _dataset_checks(ds, df, interval_s, now, schemas, unreadable).items():
+        for check, result in _dataset_checks(ds, df, interval_s, now, schemas, unreadable, advance).items():
             per_check.setdefault(check, {})[dname] = result
     checks = {"freshness": fresh}
     if problems:
@@ -292,19 +293,21 @@ def _price_checks(now: datetime, ignore_gaps: set[str], ignore_jumps: set[str], 
 
 
 def run_qa(
-    now: datetime, state: State, settings: dict, metrics: Metrics | None = None, full: bool = False
+    now: datetime, state: State, settings: dict, metrics: Metrics | None = None, full: bool = False,
+    advance_baseline: bool = True,
 ) -> dict:
-    """Run every check as of now, write data/qa/<date>.json atomically and return the report.
+    """Run every check as of now, write the report atomically and return it.
 
-    The schema baseline moves on only when metrics is given (the daemon's run), so a CLI re-run cannot erase drift.
-    full=True scans all price history for holes and jumps, reports them without failing or feeding the gauges, and
-    writes <date>-full.json so the daily report is left alone."""
+    A scheduled run (the default) records the schema baseline on first sight and moves it on after reporting drift,
+    so drift fails once. advance_baseline=False (manual inspection) changes no baseline and writes
+    data/qa/<date>-manual.json. full=True scans all price history for holes and jumps, reports them without failing
+    or feeding the gauges, changes no baseline and writes <date>-full.json. Neither overwrites the day's report."""
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     now = now.astimezone(timezone.utc)
     schemas, unreadable = _load_schemas()
     recorded = dict(schemas)
-    advance = metrics is not None
+    advance = advance_baseline and not full
     allow = settings.get("qa", {})
     ignore_gaps, ignore_jumps = set(allow.get("ignore_gaps", ())), set(allow.get("ignore_jumps", ()))
     results: dict[str, dict[str, _Check]] = {}
@@ -324,8 +327,9 @@ def run_qa(
             for name, checks in results.items()
         },
     }
-    _atomic_json(qa_dir() / f"{report['date']}{'-full' if full else ''}.json", report)
-    if unreadable or recorded != schemas:
+    suffix = "-full" if full else "" if advance_baseline else "-manual"
+    _atomic_json(qa_dir() / f"{report['date']}{suffix}.json", report)
+    if advance and (unreadable or recorded != schemas):
         _atomic_json(qa_dir() / "schemas.json", recorded)
     if metrics is not None:
         for name, checks in results.items():
@@ -334,3 +338,24 @@ def run_qa(
                     continue
                 metrics.set_qa(name, check, r.failures)
     return report
+
+
+_SCHEDULED_REPORT = re.compile(r"\d{4}-\d{2}-\d{2}\.json")
+
+
+def export_latest(metrics: Metrics) -> None:
+    """Publish the newest scheduled report's checks as sift_qa_failures (1 for a failed check, else 0).
+
+    A missing report is nothing to export; an unreadable one is logged and skipped."""
+    reports = sorted(p for p in qa_dir().glob("*.json") if _SCHEDULED_REPORT.fullmatch(p.name))
+    if not reports:
+        return
+    path = reports[-1]
+    try:
+        sources = json.loads(path.read_text())["sources"]
+        rows = [(n, c, 0 if r["ok"] else 1) for n, src in sources.items() for c, r in src["checks"].items()]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        log.warning("cannot export QA report %s: %s", path, e)
+        return
+    for source, check, failures in rows:
+        metrics.set_qa(source, check, failures)

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -252,14 +253,99 @@ def test_unknown_source_name_exits_with_a_message(registry, capsys):
 def test_qa_calls_run_qa_with_the_requested_date(registry, capsys, monkeypatch):
     calls = []
 
-    def run_qa(now, state, settings, full=False):
-        calls.append((now, full))
+    def run_qa(now, state, settings, full=False, advance_baseline=True):
+        calls.append((now, full, advance_baseline))
         return {"date": "2026-03-01", "sources": {"alpha": {"checks": {"freshness": {"ok": True, "detail": ""}}}}}
 
     monkeypatch.setattr(cli, "run_qa", run_qa)
     assert cli.main(["qa", "--date", "2026-03-01"]) == 0
     assert calls[0][0].date().isoformat() == "2026-03-01"
     assert calls[0][0].tzinfo is not None
-    assert calls[0][1] is False
+    assert calls[0][1:] == (False, True)
     assert cli.main(["qa", "--full"]) == 0
-    assert calls[1][1] is True
+    assert calls[1][1:] == (True, True)
+    assert cli.main(["qa", "--no-advance"]) == 0
+    assert calls[2][1:] == (False, False)
+
+
+def write_report(name, checks):
+    path = config.DATA_DIR / "qa" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sources = {s: {"checks": {c: {"ok": ok, "detail": ""} for c, ok in cs.items()}} for s, cs in checks.items()}
+    path.write_text(json.dumps({"date": name[:10], "sources": sources}))
+
+
+def qa_gauge(metrics, source, check):
+    return sample(metrics, "sift_qa_failures", source=source, check=check)
+
+
+def run_for(metrics, clock, ticks=1):
+    async def go():
+        stop = asyncio.Event()
+        n = 0
+
+        async def sleep(s):
+            nonlocal n
+            n += 1
+            clock.t += timedelta(seconds=s)
+            if n >= ticks:
+                stop.set()
+
+        await daemon.run(SETTINGS, [], clock=clock, sleep=sleep, stop=stop, metrics=metrics, state=State(path=config.DATA_DIR / "s.json"))
+
+    asyncio.run(go())
+
+
+def test_daemon_exports_the_newest_qa_report(tmp_path):
+    write_report("2026-03-01.json", {"sec_form4": {"duplicates": False, "freshness": True}})
+    write_report("2026-03-02.json", {"sec_form4": {"duplicates": False, "freshness": True}, "alpaca_bars": {"price_jumps": True}})
+    write_report("2026-03-03-full.json", {"alpaca_bars": {"price_jumps": False}})
+    write_report("2026-03-04-manual.json", {"alpaca_bars": {"price_jumps": False}})
+    metrics = Metrics(CollectorRegistry())
+    run_for(metrics, Clock())
+    assert qa_gauge(metrics, "sec_form4", "duplicates") == 1
+    assert qa_gauge(metrics, "sec_form4", "freshness") == 0
+    assert qa_gauge(metrics, "alpaca_bars", "price_jumps") == 0
+
+
+def test_daemon_without_a_qa_report_exports_nothing_and_keeps_running(tmp_path):
+    metrics = Metrics(CollectorRegistry())
+    run_for(metrics, Clock(), ticks=2)
+    assert qa_gauge(metrics, "sec_form4", "duplicates") is None
+
+
+def test_daemon_skips_a_corrupt_qa_report(tmp_path, caplog):
+    path = config.DATA_DIR / "qa" / "2026-03-02.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json")
+    metrics = Metrics(CollectorRegistry())
+    run_for(metrics, Clock(), ticks=2)
+    assert "2026-03-02.json" in caplog.text
+    assert qa_gauge(metrics, "sec_form4", "duplicates") is None
+
+
+def test_daemon_rereads_qa_at_most_every_five_minutes(tmp_path):
+    write_report("2026-03-02.json", {"s": {"c": False}})
+    metrics = Metrics(CollectorRegistry())
+    seen = []
+
+    async def go():
+        stop = asyncio.Event()
+        clock = Clock()
+        n = 0
+
+        async def sleep(s):
+            nonlocal n
+            n += 1
+            seen.append(qa_gauge(metrics, "s", "c"))
+            write_report("2026-03-02.json", {"s": {"c": True}})
+            clock.t += timedelta(seconds=s)
+            if n >= 12:
+                stop.set()
+
+        await daemon.run(SETTINGS, [], clock=clock, sleep=sleep, stop=stop, metrics=metrics, state=State(path=tmp_path / "s.json"))
+
+    asyncio.run(go())
+    # ticks at +0s..+330s: the rewrite is only picked up from the 300 s tick on
+    assert seen[:10] == [1] * 10
+    assert seen[10] == 0

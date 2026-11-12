@@ -161,13 +161,58 @@ def test_schema_drift_is_caught(clean):
     assert not drift["ok"] and "shares" in drift["detail"]
 
 
-def test_run_without_metrics_does_not_consume_drift(clean):
+def test_scheduled_run_reports_drift_once_then_the_next_passes(clean):
+    schema()
+    put("form4", form4_rows(10, today=10).drop(columns=["shares"]))
+    drift = schema()
+    assert not drift["ok"] and "shares" in drift["detail"]
+    assert schema()["ok"]
+    assert "shares" not in json.loads((config.DATA_DIR / "qa" / "schemas.json").read_text())["form4"]
+
+
+def test_no_advance_run_does_not_consume_drift_or_touch_the_days_report(clean):
+    schema()
+    put("form4", form4_rows(10, today=10).drop(columns=["shares"]))
+    daily_report = config.DATA_DIR / "qa" / "2026-11-12.json"
+    baseline = (config.DATA_DIR / "qa" / "schemas.json").read_text()
+    scheduled_before = daily_report.read_text()
+    for _ in range(2):
+        out = schema(advance_baseline=False)
+        assert not out["ok"] and "shares" in out["detail"]
+    assert (config.DATA_DIR / "qa" / "schemas.json").read_text() == baseline
+    assert daily_report.read_text() == scheduled_before
+    assert (config.DATA_DIR / "qa" / "2026-11-12-manual.json").exists()
+    assert not schema()["ok"]  # the scheduled run still sees the drift
+    assert schema()["ok"]
+
+
+def test_no_advance_run_records_nothing_on_first_sight(clean):
+    out = schema(advance_baseline=False)
+    assert out["ok"]
+    assert not (config.DATA_DIR / "qa" / "schemas.json").exists()
+    assert not (config.DATA_DIR / "qa" / "2026-11-12.json").exists()
+
+
+def test_metrics_no_longer_decides_whether_the_baseline_advances(clean):
     schema()
     put("form4", form4_rows(10, today=10).drop(columns=["shares"]))
     assert not schema()["ok"]
-    assert not schema()["ok"]
-    assert not schema(metrics=Metrics(CollectorRegistry()))["ok"]
     assert schema(metrics=Metrics(CollectorRegistry()))["ok"]
+
+
+def test_no_advance_run_leaves_a_corrupt_baseline_alone(clean):
+    schema()
+    path = config.DATA_DIR / "qa" / "schemas.json"
+    path.write_text("{not json")
+    assert schema(advance_baseline=False)["detail"] == "schema baseline unreadable"
+    assert path.read_text() == "{not json"
+
+
+def test_full_scan_does_not_move_the_baseline(clean):
+    schema()
+    put("form4", form4_rows(10, today=10).drop(columns=["shares"]))
+    qa.run_qa(NOW, fresh_state(), FORM4_SETTINGS, full=True)
+    assert not schema()["ok"]
 
 
 def test_unreadable_schema_baseline_fails_once_then_is_rewritten(clean):
