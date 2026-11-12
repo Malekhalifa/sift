@@ -23,19 +23,9 @@ from tp.collect.sources.finra import FIRST, fetch_day, merge_shortvol, write_day
 from tp.collect.sources.sec import atomic_parquet
 
 
-def collector_running() -> bool:
-    """True while a recorder daemon holds the data directory's lock (probed without blocking, released at once)."""
-    try:
-        daemon.acquire_lock(daemon.lock_path()).close()
-    except daemon.AlreadyRunning:
-        return True
-    return False
-
-
 def main() -> int:
-    if collector_running():
-        print(f"the recorder daemon is running ({daemon.lock_path()} is locked); stop it before rebuilding shortvol.parquet", file=sys.stderr)
-        return 2
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     folder = config.DATA_DIR / "finra"
     daily = folder / "daily"
     daily.mkdir(parents=True, exist_ok=True)

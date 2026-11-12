@@ -98,6 +98,15 @@ def legacy_awards(*rows: tuple[str, str, float]) -> None:
     df.to_parquet(path, index=False)
 
 
+def test_political_user_agent_is_descriptive_and_has_no_email():
+    client = pol._default_http()
+    try:
+        agent = client.headers["User-Agent"]
+    finally:
+        client.close()
+    assert agent.startswith("sift-research (") and "@" not in agent
+
+
 # DoD awards
 
 def test_awards_since_refetches_from_the_last_month_and_dedupes():
@@ -151,16 +160,24 @@ def test_awards_retry_a_5xx_then_succeed():
 
 def test_dod_awards_run_appends_to_a_legacy_file_without_touching_its_rows():
     legacy_awards(("OLD1", "2026-10-02", 1e8), ("OLD2", "2026-10-20", 2e8))
-    seen = {"2026-10": page(tx("OLD2", "2026-10-20", 2e8), tx("NEW1", "2026-10-25", 3e8)), "2026-11": page(tx("NEW2", "2026-11-03", 4e8))}
+    seen = {"2026-08": page(), "2026-09": page(tx("LATE", "2026-09-02", 1.2e8)),
+            "2026-10": page(tx("OLD2", "2026-10-20", 2e8), tx("NEW1", "2026-10-25", 3e8)), "2026-11": page(tx("NEW2", "2026-11-03", 4e8))}
     http = FakeHttp(post=lambda body: seen[month_of(body)])
     src = DodAwards(http_factory=lambda: http)
-    assert src.run(ctx()) == 2
-    assert [month_of(b) for b in http.bodies] == ["2026-10", "2026-11"]
+    assert src.run(ctx()) == 3
+    assert [month_of(b) for b in http.bodies] == ["2026-08", "2026-09", "2026-10", "2026-11"]
     out = pd.read_parquet(political.awards_path())
-    assert sorted(out["award_id"]) == ["NEW1", "NEW2", "OLD1", "OLD2"]
+    assert sorted(out["award_id"]) == ["LATE", "NEW1", "NEW2", "OLD1", "OLD2"]
     assert out.set_index("award_id").loc["OLD1", "recipient"] == "OLD CO"
     assert str(out["amount"].dtype) == "float64" and str(out["action_date"].dtype) == "datetime64[us]"
     assert "ingested_at" in out.columns
+
+
+def test_dod_awards_refetch_starts_two_months_before_the_stored_max_action_month():
+    legacy_awards(("OLD1", "2026-03-31", 1e8), ("OLD0", "2026-01-05", 1e8))
+    http = FakeHttp(post=lambda body: page())
+    DodAwards(http_factory=lambda: http).fetch(ctx())
+    assert month_of(http.bodies[0]) == "2026-01"
 
 
 def test_dod_awards_first_run_without_a_file_backfills_from_2016():
@@ -320,6 +337,22 @@ def test_trump_posts_second_run_adds_nothing_and_keeps_ingested_at():
     assert http.urls.count(pol.TWEETS.format(year=2016)) == 1
 
 
+def test_trump_posts_a_dropped_row_stays_and_an_edited_row_is_replaced_keeping_its_first_ingested_at():
+    first = datetime(2026, 11, 12, tzinfo=UTC)
+    second = datetime(2026, 11, 20, tzinfo=UTC)
+    legacy_posts(("twitter",))
+    http = FakeHttp(gets={pol.TRUTH: truth_parquet(TRUTH_ROWS)})
+    src = TrumpPosts(http_factory=lambda: http)
+    src.run(RunContext(now=first, settings=SETTINGS, writer=lambda ds, df: store.write(ds, df, now=first)))
+    edited = [truth("6", "2026-11-06T12:00:00.000Z", "Plain text post, edited")]  # post 1 is gone from the archive
+    http.gets[pol.TRUTH] = truth_parquet(edited)
+    src.run(RunContext(now=second, settings=SETTINGS, writer=lambda ds, df: store.write(ds, df, now=second)))
+    out = pd.read_parquet(political.posts_path()).set_index("id")
+    assert "1" in out.index and out.loc["1", "text"] == "Great day for  Boeing  & America"
+    assert out.loc["6", "text"] == "Plain text post, edited"
+    assert out.loc["6", "ingested_at"] == pd.Timestamp(first)
+
+
 def test_trump_posts_appends_to_a_legacy_file_with_matching_dtypes():
     legacy_posts(("twitter",))
     src = TrumpPosts(http_factory=lambda: FakeHttp(gets={pol.TRUTH: truth_parquet(TRUTH_ROWS)}))
@@ -376,13 +409,14 @@ def test_trump_posts_registers_from_settings():
 
 # the legacy script
 
-def test_fetch_political_script_still_writes_both_files(monkeypatch):
+def load_script():
     spec = importlib.util.spec_from_file_location("fetch_political", Path(__file__).parents[2] / "scripts" / "fetch_political.py")
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
-    http = FakeHttp(gets=tweet_routes() | {script.TRUTH: truth_parquet(TRUTH_ROWS)},
-                    post=lambda body: page(tx("A1", "2026-02-02", 2e8)) if month_of(body) == "2026-02" else page())
+    return script
 
+
+def patch_client(monkeypatch, script, http) -> None:
     class Client:
         def __init__(self, **_):
             pass
@@ -394,9 +428,40 @@ def test_fetch_political_script_still_writes_both_files(monkeypatch):
             return False
 
     monkeypatch.setattr(script.httpx, "Client", Client)
+
+
+def script_http(script, truth_rows=TRUTH_ROWS) -> FakeHttp:
+    return FakeHttp(gets=tweet_routes() | {script.TRUTH: truth_parquet(truth_rows)},
+                    post=lambda body: page(tx("A1", "2026-02-02", 2e8)) if month_of(body) == "2026-02" else page())
+
+
+def test_fetch_political_script_still_writes_both_files(monkeypatch):
+    script = load_script()
+    patch_client(monkeypatch, script, script_http(script))
     assert script.main() == 0
     posts = pd.read_parquet(political.posts_path())
     assert posts.columns.tolist() == ["source", "id", "ts", "text"] and len(posts) == 4
     awards = pd.read_parquet(political.awards_path())
-    assert awards["award_id"].tolist() == ["A1"] * len(awards) and len(awards) == 1
-    assert not (config.DATA_DIR / "political" / "posts.parquet.tmp").exists()
+    assert awards["award_id"].tolist() == ["A1"] and len(awards) == 1
+    assert not list((config.DATA_DIR / "political").glob("*.tmp"))
+
+
+def test_fetch_political_script_merges_posts_instead_of_rebuilding(monkeypatch):
+    script = load_script()
+    stamp = pd.Timestamp("2026-11-01T00:00:00Z")
+    stored = pd.DataFrame({
+        "source": pd.Series(["truth", "truth", "twitter"], dtype="str"), "id": pd.Series(["1", "gone", "t1"], dtype="str"),
+        "ts": pd.to_datetime(["2026-11-01T12:00:00Z", "2026-10-01T12:00:00Z", "2016-01-01T00:44:14Z"]).astype("datetime64[us, UTC]"),
+        "text": pd.Series(["old text", "dropped by the archive", "Happy new year"], dtype="str"), "ingested_at": [stamp] * 3,
+    })
+    political.posts_path().parent.mkdir(parents=True)
+    stored.to_parquet(political.posts_path(), index=False)
+    patch_client(monkeypatch, script, script_http(script))
+    assert script.main() == 0
+    out = pd.read_parquet(political.posts_path()).set_index(["source", "id"])
+    assert ("truth", "gone") in out.index  # a shrinking archive deletes nothing
+    assert out.loc[("truth", "1"), "text"] == "Great day for  Boeing  & America"
+    assert out.loc[("truth", "1"), "ingested_at"] == stamp and out.loc[("truth", "gone"), "ingested_at"] == stamp
+    assert out.loc[("truth", "6"), "ingested_at"] is pd.NaT or pd.isna(out.loc[("truth", "6"), "ingested_at"])
+    assert out.reset_index()["ts"].is_monotonic_increasing
+    assert not list((config.DATA_DIR / "political").glob("*.tmp"))

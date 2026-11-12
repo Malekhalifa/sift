@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from collections.abc import Callable
 from datetime import timedelta
 
@@ -35,6 +36,7 @@ UA = {"User-Agent": "sift-research (market data research; python-httpx)"}
 RETRY_AFTER_S = 600
 DATE_FORMAT = "%B %d, %Y"
 KEY = ["effective_date", "added", "removed"]
+TICKER = re.compile(r"[A-Z]{1,5}([.\-][A-Z])?")
 LAYOUT = [  # the leading columns, in order; columns after them (Refs) are ignored
     ("Effective Date", "Effective Date"), ("Added", "Ticker"), ("Added", "Security"),
     ("Removed", "Ticker"), ("Removed", "Security"), ("Reason", "Reason"),
@@ -47,8 +49,13 @@ def _default_http() -> httpx.Client:
 
 
 def _ticker(series: pd.Series) -> pd.Series:
-    """Stripped tickers, '' when empty; Wikipedia has a few cells with a stray trailing '|' (ALLE |, JCP |, ITT |)."""
-    return series.fillna("").astype("str").str.replace(r"\s*\|\s*$", "", regex=True).str.strip()
+    """Stripped tickers, '' when empty; Wikipedia has a few cells with a stray trailing '|' (ALLE |, JCP |, ITT |).
+    A cell that is still not a single ticker (several tickers, a footnote) raises SourceError."""
+    out = series.fillna("").astype("str").str.replace(r"\s*\|\s*$", "", regex=True).str.strip()
+    bad = out[(out != "") & ~out.str.fullmatch(TICKER)]
+    if not bad.empty:
+        raise SourceError(f"S&P 500 changes: not a ticker: {bad.head(3).tolist()}")
+    return out
 
 
 def parse_changes(html: str) -> pd.DataFrame:

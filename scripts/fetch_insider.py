@@ -18,6 +18,7 @@ import httpx
 import pandas as pd
 
 from tp import config, insiders
+from tp.collect import daemon
 from tp.collect.sources import sec
 from tp.edgar import EdgarBadResponse, EdgarBlocked, EdgarClient, user_agent
 
@@ -38,6 +39,8 @@ def write_symbol_map() -> int:
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     folder = config.DATA_DIR / "insider"
     parsed = folder / "parsed"
     parsed.mkdir(parents=True, exist_ok=True)

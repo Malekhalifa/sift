@@ -2,9 +2,12 @@
 Trump's original posts (tweets 2016-2018 from the bpb27 archive, Truth Social from CNN's archive).
 
 `fetch_tweets`, `fetch_truth` and `fetch_awards` are shared with scripts/fetch_political.py. Awards are fetched
-incrementally: a run asks again for the month of the newest stored action date, and the writer drops what is already stored.
+incrementally: a run asks again from two months before the newest stored action date (late-posted transactions), and the
+writer drops what is already stored.
 CNN's archive is downloaded in full on every run (a few MB). The bpb27 tweets never change, so they are downloaded only
 while the stored posts file has no `twitter` rows; that is derived from the file itself, there is no separate marker.
+A post the archive no longer lists stays stored; a post whose text was edited replaces the stored row and keeps the
+ingested_at of its first sighting.
 
 A body that is not what was asked for (not a parquet, not a zip, JSON without `results`, missing columns, no rows at all
 from the Truth Social archive) raises SourceError and is never turned into rows.
@@ -41,14 +44,16 @@ log = logging.getLogger(__name__)
 TWEETS = "https://raw.githubusercontent.com/bpb27/trump_tweet_data_archive/master/condensed_{year}.json.zip"
 TRUTH = "https://ix.cnn.io/data/truth-social/truth_archive.parquet"
 USASPENDING = "https://api.usaspending.gov/api/v2/search/spending_by_transaction/"
-UA = {"User-Agent": "sift-research"}
+UA = {"User-Agent": "sift-research (market data research; python-httpx)"}
 TAG = re.compile(r"<[^>]+>")
 RETRY_AFTER_S = 600
 FIRST_AWARD_DAY = pd.Timestamp(2016, 1, 1)
+AWARD_REFETCH_MONTHS = 2  # a transaction can be posted to USAspending months after its action date
 AWARD_RETRIES = 4
 AWARD_KEY = ["award_id", "action_date", "amount"]
 AWARD_COLUMNS = ["award_id", "recipient", "action_date", "amount"]
 POST_COLUMNS = ["source", "id", "ts", "text"]
+POST_KEY = ["source", "id"]
 # What a body that is not the expected shape raises while it is parsed.
 PARSE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, OSError, zipfile.BadZipFile)
 
@@ -83,6 +88,16 @@ def fetch_truth(http: httpx.Client) -> pd.DataFrame:
     text = df["content"].fillna("").map(lambda s: TAG.sub(" ", s).replace("&amp;", "&").strip())
     keep = ~text.str.startswith("RT") & (text.str.len() > 0)
     return _posts_frame("truth", df["id"], df["created_at"], text)[keep].reset_index(drop=True)
+
+
+def merge_posts(old: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    """`fresh` rows over the stored ones: a stored post missing from `fresh` stays, an edited one is replaced, and every
+    stored `ingested_at` survives."""
+    out = pd.concat([old, fresh], ignore_index=True).drop_duplicates(POST_KEY, keep="last")
+    if "ingested_at" in old.columns:
+        prior = old.drop_duplicates(POST_KEY, keep="last").set_index(POST_KEY)["ingested_at"]
+        out["ingested_at"] = prior.reindex(pd.MultiIndex.from_frame(out[POST_KEY])).to_numpy()
+    return out.sort_values("ts", kind="stable").reset_index(drop=True)
 
 
 def _empty_awards() -> pd.DataFrame:
@@ -166,7 +181,7 @@ class _PoliticalSource(Source):
 
 
 class DodAwards(_PoliticalSource):
-    """DoD contract transactions of at least $100 million; each run re-reads from the month of the newest stored one."""
+    """DoD contract transactions of at least $100 million; each run re-reads from two months before the newest stored one."""
 
     name = "dod_awards"
     rate_group = "usaspending"
@@ -182,7 +197,9 @@ class DodAwards(_PoliticalSource):
 
     def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
         stored = _stored_column(self.datasets[0], "action_date")
-        since = None if stored is None or stored.dropna().empty else pd.Timestamp(stored.max())
+        since = None
+        if stored is not None and not stored.dropna().empty:
+            since = pd.Timestamp(stored.max()) - pd.DateOffset(months=AWARD_REFETCH_MONTHS)
         until = pd.Timestamp(ctx.now.astimezone(ZoneInfo(DEFAULT_TZ)).date())
         http = self._http_factory()
         try:

@@ -14,10 +14,13 @@ import sys
 import pandas as pd
 
 from tp import config, events
+from tp.collect import daemon
 from tp.edgar import EdgarBlocked, EdgarClient
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--universe", choices=["events", "confirm"], default="events")
     args = ap.parse_args()

@@ -13,10 +13,13 @@ import sys
 import pandas as pd
 
 from tp import config
+from tp.collect import daemon
 from tp.edgar import EdgarBlocked, EdgarClient
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     symbols = list(dict.fromkeys([*config.load_universe()["universe"]["traded"], *config.events_symbols(), *config.confirm_symbols()]))
     client = EdgarClient()
     frames, missing = [], []

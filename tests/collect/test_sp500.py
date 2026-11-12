@@ -166,3 +166,10 @@ def test_sp500_registers_from_settings():
     assert found.rate_group == "wikipedia"
     assert [d.name for d in found.datasets] == ["sp500_changes"]
     assert found.datasets[0].path == config.DATA_DIR / "store" / "sp500_changes.parquet"
+
+
+@pytest.mark.parametrize("cell", ["AAPL, MSFT", "AAPL [1]", "aapl", "TOOLONG", "A.BC", "BRK.B.X"])
+def test_sp500_a_ticker_cell_that_is_not_a_single_ticker_raises_source_error(cell):
+    src, _ = source(HTML.replace("<td>OKTA</td>", f"<td>{cell}</td>"))
+    with pytest.raises(SourceError, match="not a ticker"):
+        src.fetch(ctx())

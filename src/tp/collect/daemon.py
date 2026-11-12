@@ -5,6 +5,7 @@ import asyncio
 import fcntl
 import logging
 import shutil
+import sys
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -42,6 +43,17 @@ def acquire_lock(path: Path) -> IO:
         f.close()
         raise AlreadyRunning(f"another recorder holds {path}") from None
     return f
+
+
+def refuse_while_daemon_runs() -> int | None:
+    """For legacy scripts that write under data/: 2 (after a message on stderr) while a recorder daemon holds the data
+    directory's lock, else None. The lock is probed without blocking and released at once."""
+    try:
+        acquire_lock(lock_path()).close()
+    except AlreadyRunning:
+        print(f"the recorder daemon is running ({lock_path()} is locked); stop it before running this script", file=sys.stderr)
+        return 2
+    return None
 
 
 def _update_gauges(metrics: Metrics, sources: list[Source], state: State, now: datetime, started: datetime) -> None:

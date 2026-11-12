@@ -12,7 +12,8 @@ Nothing from 2025 on is read by any M12 analysis until the protocol's holdout ru
 so the holdout run does not need a second download.
 
 The fetch functions live in tp.collect.sources.political, where the recorder's dod_awards and trump_posts sources use them.
-This script rewrites the files whole (without the recorder's ingested_at column, which the recorder's writer tolerates).
+Stored posts are merged with the fresh ones (a post the archive dropped stays, ingested_at survives) and both files are
+replaced atomically. The script refuses to run while the recorder daemon holds the data directory's lock.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ import httpx
 import pandas as pd
 
 from tp import config, political
+from tp.collect import daemon
 from tp.collect.sources.political import (  # noqa: F401
     TRUTH,
     TWEETS,
@@ -33,6 +35,7 @@ from tp.collect.sources.political import (  # noqa: F401
     fetch_awards,
     fetch_truth,
     fetch_tweets,
+    merge_posts,
 )
 
 
@@ -48,11 +51,15 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     folder = config.DATA_DIR / "political"
     folder.mkdir(parents=True, exist_ok=True)
     with httpx.Client(headers=UA, timeout=120.0, follow_redirects=True) as http:
         posts = pd.concat([fetch_tweets(http), fetch_truth(http)], ignore_index=True).sort_values("ts").reset_index(drop=True)
+        if political.posts_path().exists():
+            posts = merge_posts(pd.read_parquet(political.posts_path()), posts)
         write_parquet(posts, political.posts_path())
         print(f"{len(posts):,} original posts ({posts['source'].value_counts().to_dict()}); {posts['ts'].min():%Y-%m-%d} to {posts['ts'].max():%Y-%m-%d}")
         old = pd.read_parquet(political.awards_path()) if political.awards_path().exists() else None

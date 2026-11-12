@@ -16,11 +16,14 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 from tp import config
+from tp.collect import daemon
 from tp.collect.sources import sec
 from tp.edgar import EdgarBadResponse, EdgarBlocked, EdgarClient
 
 
 def main() -> int:
+    if (refused := daemon.refuse_while_daemon_runs()) is not None:
+        return refused
     folder = config.DATA_DIR / "xbrl"
     by_symbol = folder / "by_symbol"
     by_symbol.mkdir(parents=True, exist_ok=True)
