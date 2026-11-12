@@ -218,12 +218,41 @@ def test_rate_limit_window_does_not_touch_other_groups_due_sources(tmp_path):
     assert sched.due() == [other]
 
 
-@pytest.mark.parametrize("given, expected", [(10**9, 6 * 3600), (-5, 0), (0, 0), (90, 90)])
+@pytest.mark.parametrize("given, expected", [(10**9, 6 * 3600), (-5, 60), (0, 60), (90, 90)])
 def test_rate_limit_retry_after_is_clamped(tmp_path, given, expected):
     a = Fake("a", raises=RateLimited("429", retry_after_s=given))
     sched, state, clock = make(tmp_path, [a])
     tick(sched)
     assert state.backoff_until("a") == clock.t + timedelta(seconds=expected)
+
+
+def test_retry_after_below_the_exponential_backoff_does_not_shorten_it(tmp_path):
+    a = Fake("a", raises=RateLimited("429", retry_after_s=30))
+    sched, state, clock = make(tmp_path, [a])
+    for _ in range(4):
+        tick(sched)
+        clock.t = state.backoff_until("a")
+    tick(sched)
+    assert state.failures("a") == 5
+    assert state.backoff_until("a") == clock.t + timedelta(seconds=960)
+
+
+def test_group_window_matches_the_effective_backoff_of_the_limited_source(tmp_path):
+    limited = Fake("limited", group="sec", raises=RateLimited("429", retry_after_s=30))
+    sibling = Fake("sibling", group="sec")
+    sched, state, clock = make(tmp_path, [limited, sibling])
+    state.record_failure("limited", clock.t, "earlier", None)
+    state.record_failure("limited", clock.t, "earlier", None)
+    state.record_failure("limited", clock.t, "earlier", None)
+    clock.t = state.backoff_until("limited")
+    start = clock.t
+    tick(sched)
+    assert state.backoff_until("limited") == start + timedelta(seconds=480)
+    assert sibling.calls == 0
+    clock.advance(seconds=479)
+    assert sibling not in sched.due()
+    clock.advance(seconds=1)
+    assert sibling in sched.due()
 
 
 def test_backoff_grows_and_caps(tmp_path):

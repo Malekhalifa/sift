@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from tp.collect.source import RateLimited, RunContext, Source
 from tp.collect.state import BACKOFF_CAP_S, State
@@ -106,7 +106,8 @@ class Scheduler:
         retry_after = None
         if isinstance(exc, RateLimited):
             retry_after = min(max(exc.retry_after_s, 0), BACKOFF_CAP_S)
-            window_end = now + timedelta(seconds=retry_after)
-            self._group_until[source.rate_group] = max(window_end, self._group_until.get(source.rate_group, window_end))
         log.warning("source %s failed: %s", source.name, error)
         self.state.record_failure(source.name, now, error, retry_after)
+        if retry_after is not None:
+            window_end = self.state.backoff_until(source.name)
+            self._group_until[source.rate_group] = max(window_end, self._group_until.get(source.rate_group, window_end))

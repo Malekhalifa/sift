@@ -81,10 +81,12 @@ class State:
         })
 
     def record_failure(self, name: str, now: datetime, error: str, retry_after_s: float | None = None) -> None:
-        """Count a failure and set backoff: exponential from 60s capped at 6h, or retry_after_s when given."""
+        """Count a failure and set backoff: exponential from 60s; retry_after_s applies only when larger; capped at 6h."""
         with self._lock:
             failures = int(self._data.get(name, {}).get("failures", 0)) + 1
-        wait = retry_after_s if retry_after_s is not None else min(BACKOFF_BASE_S * 2 ** min(failures - 1, 20), BACKOFF_CAP_S)
+        wait = min(BACKOFF_BASE_S * 2 ** min(failures - 1, 20), BACKOFF_CAP_S)
+        if retry_after_s is not None:
+            wait = min(max(wait, retry_after_s), BACKOFF_CAP_S)
         self._update(name, {
             "failures": failures, "last_error": error, "backoff_until": _iso(now + timedelta(seconds=wait)),
         })
