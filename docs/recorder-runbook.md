@@ -17,7 +17,7 @@ uv run python -m tp.collect.tools.local_stack install --dry-run
 It prints the preflight result (errors stop the install, warnings do not), then the two plists it would write and the
 `launchctl` commands it would run. Preflight checks that `.venv/bin/python` exists and is executable (otherwise it says to run `uv sync --frozen --no-dev` first), the data directory is writable, at least 10 GB
 is free (20 GB warns), port 9120 is free, and `.env` has `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` and
-`SEC_USER_AGENT`. It reports a missing key by name only and never prints a value. `APIFY_API_KEY` is only required while
+`SEC_USER_AGENT` (your name plus a contact email, for example `Your Name your.email@example.com`; the SEC requires a declared contact on every request, and `.env.example` shows the line). It reports a missing key by name only and never prints a value. `APIFY_API_KEY` is only required while
 `congress_trades` is enabled. The plists contain no secrets: the tools read `.env` themselves and the only environment
 variable set is `PATH`.
 
@@ -78,7 +78,8 @@ All rules are in `deploy/sift_alerts.yml`.
 ## After the Mac slept
 
 Nothing to do. The daemon computes what is due from `data/collect/state.json` when it wakes, so each source runs once
-to catch up, within its own `lag_minutes` rule (it never asks for data newer than now minus the lag). Expect brief
+to catch up. Only `alpaca_bars` applies a lag (`lag_minutes`, through `tp.recorder.fetch_end`: it never asks for bars newer
+than now minus the lag); for the other sources `Source.lag` is informational. Expect brief
 `SiftSourceStale` or `SiftTargetDown` alerts while it catches up. The 06:15 QA job runs on wake if the Mac was asleep at
 06:15. If a source is still stale a few minutes after wake, run `python -m tp.collect once <name>` (see below).
 Prometheus and Alertmanager sleep with the Mac, so no alert can arrive while it is asleep.
@@ -95,6 +96,11 @@ A disabled source stays off until you turn it on:
 4. Start the daemon again (`local_stack install`) so it picks up the config.
 
 The manual scripts (`scripts/fetch_*.py`) that write under `data/` also refuse to run while the daemon runs; stop it first.
+
+### Source notes
+
+- `alpaca_bars`: one series that fails permanently (a delisted or renamed symbol) marks the whole feed failed on every
+  run, so `SiftSourceErrors` keeps firing. Remove the symbol from the universe config.
 
 ### Before enabling congress_trades (Apify, costs money)
 
@@ -115,13 +121,13 @@ a product, a person or a disambiguation page), copy the accepted ones under `[ar
 ## Wiring Prometheus (needs the user's approval; nothing here is applied automatically)
 
 quantstack's `deploy/local/prometheus.yml` (the file its launchd agent runs; under
-`/Users/m6l9k/quantstack-data/app/p2-recorder/deploy/local/`) gets two additions: a `rule_files` entry and a scrape job.
+`<quantstack checkout>/deploy/local/`) gets two additions: a `rule_files` entry and a scrape job.
 The job must be named `sift`, because the alert rules match `up{job="sift"}`.
 
 ```diff
  rule_files:
    - ../alerts.yml
-+  - /Users/m6l9k/.t3/projects/trading-pipeline/deploy/sift_alerts.yml
++  - <repo>/deploy/sift_alerts.yml
 ...
  scrape_configs:
    - job_name: recorder
@@ -182,8 +188,20 @@ Install, then touch nothing for 7 days apart from the one deliberate dead-man te
       `SiftTargetDown` alert, and after `SIGCONT` the alert resolved and the daemon was healthy again.
 - [ ] No `SiftSourceStale` or `SiftQaStale` alert stayed open without a known cause.
 
+Expect one thing in the first week: the first scheduled QA after the daemon adds `ingested_at` to a legacy file reports
+a one-time `schema` failure for that dataset (the baseline then advances, and the failure does not repeat).
+
 Record the result here, with the dates, when done:
 
 ```text
 Acceptance: not started
 ```
+
+## Known limits
+
+- `wikipedia_pageviews` (disabled): a systemic 404 (every article missing) reads as an empty success. Add the
+  FINRA-style staleness check (an empty read from a stale store is an error) before enabling it.
+- `congress_trades` (disabled): paid rows can be lost if both the pending-file write and the store write fail in the same
+  run.
+- `congress_trades` (disabled): the Apify actor input names and the `/v2/users/me/limits` field names are unverified.
+  Check them against the real actor and API before setting `enabled = true`.

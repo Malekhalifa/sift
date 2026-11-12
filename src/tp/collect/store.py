@@ -73,6 +73,8 @@ def _atomic_write(ds: Dataset, df: pd.DataFrame) -> None:
     tmp = ds.path.with_suffix(ds.path.suffix + ".tmp")
     try:
         df.to_parquet(tmp, index=False)
+        with open(tmp, "rb+") as f:
+            os.fsync(f.fileno())
         os.replace(tmp, ds.path)
     except BaseException:
         tmp.unlink(missing_ok=True)

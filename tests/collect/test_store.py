@@ -57,6 +57,25 @@ def test_write_is_atomic(ds, monkeypatch):
     assert ds.path.read_bytes() == before
 
 
+def test_write_fsyncs_the_temp_file_before_replacing(ds, monkeypatch):
+    events = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def fsync(fd):
+        events.append("fsync")
+        real_fsync(fd)
+
+    def replace(src, dst):
+        events.append("replace")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    store.write(ds, rows((1, "2024-01-01", 1)), now=NOW)
+    assert events == ["fsync", "replace"]
+    assert list(stored(ds)["id"]) == [1]
+
+
 def test_ingested_at_is_added_once(ds):
     store.write(ds, rows((1, "2024-01-01", 1)), now=NOW)
     store.write(ds, rows((1, "2024-01-01", 10), (2, "2024-01-02", 2)), now=LATER)
