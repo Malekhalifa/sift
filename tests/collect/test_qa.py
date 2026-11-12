@@ -450,8 +450,8 @@ def test_unreadable_dataset_is_reported_not_raised(clean):
 def test_source_with_several_datasets_reports_the_failing_one():
     settings = {"sources": {"sec_filings": {"schedule": "daily 07:30"}}}
     for name in ("eightk", "earnings"):
-        put(name, pd.DataFrame({"accession": ["a", "b"], "filed_at": [pd.Timestamp("2026-11-01", tz="UTC")] * 2}))
-    put("tenk_index", pd.DataFrame({"accn": ["a", "a"], "filed_at": [pd.Timestamp("2026-11-01", tz="UTC")] * 2}))
+        put(name, pd.DataFrame({"symbol": ["X", "X"], "accession": ["a", "b"], "filed_at": [pd.Timestamp("2026-11-01", tz="UTC")] * 2}))
+    put("tenk_index", pd.DataFrame({"symbol": ["X", "X"], "accn": ["a", "a"], "filed_at": [pd.Timestamp("2026-11-01", tz="UTC")] * 2}))
     c = checks(qa.run_qa(NOW, FakeState(sec_filings=NOW), settings), "sec_filings")
     assert not c["duplicates"]["ok"] and "tenk_index" in c["duplicates"]["detail"]
     assert c["future_timestamps"]["ok"]

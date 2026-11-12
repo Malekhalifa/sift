@@ -23,9 +23,9 @@ def _under(*parts: str) -> Callable[[], Path]:
 
 # name -> (path factory, dedup key, timestamp column). Paths resolve at access so TP_DATA_DIR overrides apply.
 _SPECS: dict[str, tuple[Callable[[], Path], tuple[str, ...], str]] = {
-    "eightk": (_under("events", "eightk.parquet"), ("accession",), "filed_at"),
-    "earnings": (_under("events", "earnings.parquet"), ("accession",), "filed_at"),
-    "tenk_index": (_under("store", "tenk_index.parquet"), ("accn",), "filed_at"),
+    "eightk": (_under("events", "eightk.parquet"), ("symbol", "accession"), "filed_at"),
+    "earnings": (_under("events", "earnings.parquet"), ("symbol", "accession"), "filed_at"),
+    "tenk_index": (_under("store", "tenk_index.parquet"), ("symbol", "accn"), "filed_at"),
     "form4": (_under("insider", "trades.parquet"), ("trade_id", "owner_cik"), "filing_date"),
     "xbrl_shares": (_under("xbrl", "shares.parquet"), ("accn", "symbol"), "filed"),
     "finra_shortvol": (_under("finra", "shortvol.parquet"), ("date", "symbol"), "date"),

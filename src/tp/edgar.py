@@ -31,6 +31,10 @@ TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
 
 
+class EdgarBadResponse(RuntimeError):
+    """A 200 response that is not the JSON document we asked for; the cache is left untouched."""
+
+
 class EdgarBlocked(RuntimeError):
     """The SEC rate-limited us (403/429). The block usually clears in about ten minutes; stop and retry later."""
 
@@ -92,8 +96,9 @@ class EdgarClient:
         self._http = http or httpx.Client(headers={"User-Agent": user_agent(), "Accept-Encoding": "gzip, deflate"}, timeout=30.0)
         self._last = 0.0
 
-    def _get_json(self, url: str, cache_name: str, refresh: bool = False) -> dict:
-        """Cached GET. With refresh=True the cache is not read and is atomically replaced by the fresh response."""
+    def _get_json(self, url: str, cache_name: str, refresh: bool = False, require: str | None = None) -> dict:
+        """Cached GET. With refresh=True the cache is not read and is atomically replaced by the fresh response.
+        A body that is not JSON, or lacks the `require` key, raises EdgarBadResponse and never reaches the cache."""
         path = self.cache / cache_name
         if not refresh and path.exists():
             return json.loads(path.read_text())
@@ -105,8 +110,13 @@ class EdgarClient:
         if r.status_code in (403, 429):
             raise EdgarBlocked(f"HTTP {r.status_code} from {url.split('/')[2]}: rate-limited, retry in ~10 minutes")
         r.raise_for_status()
-        data = r.json()
-        tmp = path.with_name(path.name + ".tmp")
+        try:
+            data = r.json()
+        except ValueError as e:
+            raise EdgarBadResponse(f"{url}: response is not JSON") from e
+        if require is not None and not (isinstance(data, dict) and require in data):
+            raise EdgarBadResponse(f"{url}: response lacks {require!r}")
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         try:
             tmp.write_text(json.dumps(data))
             os.replace(tmp, path)
@@ -124,10 +134,10 @@ class EdgarClient:
         """The CIK's main submissions JSON (the recent block) followed by its older pages. Only the main file is
         refreshed; older pages never change, so they come from the cache and are downloaded only when missing."""
         name = f"CIK{cik:010d}.json"
-        main = self._get_json(SUBMISSIONS_URL.format(name=name), name, refresh=refresh)
+        main = self._get_json(SUBMISSIONS_URL.format(name=name), name, refresh=refresh, require="filings")
         pages = [main]
         for extra in main.get("filings", {}).get("files", []):
-            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"]))
+            pages.append(self._get_json(SUBMISSIONS_URL.format(name=extra["name"]), extra["name"], require="accessionNumber"))
         return pages
 
     def earnings_filings(self, cik: int) -> pd.DataFrame:

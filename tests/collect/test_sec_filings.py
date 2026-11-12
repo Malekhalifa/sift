@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import pandas as pd
 import pytest
 
 from tp import config, edgar
-from tp.collect import datasets
+from tp.collect import datasets, store
 from tp.collect.source import Daily, RateLimited, RunContext, SourceError
 from tp.collect.sources import build_sources, source_settings
 from tp.collect.sources.sec import SecFilings
@@ -29,6 +30,11 @@ def old_version() -> dict:
     for col, vals in old["filings"]["recent"].items():
         old["filings"]["recent"][col] = vals[1:]
     return old
+
+
+def listed_as(*names: str) -> dict:
+    """The fixture submissions JSON with its ticker list set."""
+    return FIXTURE | {"tickers": list(names)}
 
 
 def tickers(**ciks: int) -> dict:
@@ -71,8 +77,8 @@ def make(tmp_path, routes) -> tuple[SecFilings, FakeHttp, Path]:
 
 
 def routes(**extra) -> dict:
-    r = {TICKERS_URL: tickers(AAA=1000, BBB=2000), sub_url("CIK0000001000.json"): FIXTURE,
-         sub_url("CIK0000002000.json"): FIXTURE}
+    r = {TICKERS_URL: tickers(AAA=1000, BBB=2000), sub_url("CIK0000001000.json"): listed_as("AAA"),
+         sub_url("CIK0000002000.json"): listed_as("BBB")}
     r.update(extra)
     return r
 
@@ -109,7 +115,7 @@ def test_cache_is_replaced_when_refreshing(tmp_path):
     cache.mkdir()
     (cache / "CIK0000001000.json").write_text(json.dumps(old_version()))
     src.fetch(ctx())
-    assert json.loads((cache / "CIK0000001000.json").read_text()) == FIXTURE
+    assert json.loads((cache / "CIK0000001000.json").read_text()) == listed_as("AAA")
     assert not list(cache.glob("*.tmp"))
 
 
@@ -163,7 +169,8 @@ def test_only_the_main_submissions_json_is_refreshed_older_pages_come_from_cache
 
 def test_requests_once_per_cik_and_refreshes_the_ticker_map_once(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "events_symbols", lambda: ["AAA2"])
-    src, http, _ = make(tmp_path, routes(**{TICKERS_URL: tickers(AAA=1000, AAA2=1000)}))
+    src, http, _ = make(tmp_path, routes(**{TICKERS_URL: tickers(AAA=1000, AAA2=1000),
+                                            sub_url("CIK0000001000.json"): listed_as("AAA", "AAA2")}))
     src.fetch(ctx())
     assert http.urls.count(TICKERS_URL) == 1
     assert http.urls.count(sub_url("CIK0000001000.json")) == 1
@@ -220,3 +227,122 @@ def test_source_settings_missing_table_exits_with_a_clear_message():
 def test_build_sources_exits_when_a_source_table_is_missing():
     with pytest.raises(SystemExit, match=r"missing \[sources.alpaca_bars\]"):
         build_sources({"sources": {"sec_filings": SETTINGS["sources"]["sec_filings"]}})
+
+
+def test_dual_class_tickers_sharing_a_cik_keep_both_rows_when_merged_into_a_legacy_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "events_symbols", lambda: ["AAA2"])
+    monkeypatch.setattr(config, "confirm_symbols", lambda: [])
+    legacy_ts = pd.Timestamp("2026-01-28T21:30:42Z")
+    legacy = pd.DataFrame({
+        "symbol": ["AAA", "AAA2", "AAA", "AAA2", "OLD"],
+        "accession": ["0001000-26-000001"] * 2 + ["0001000-20-000007"] * 2 + ["0009-19-000001"],
+        "filed_at": [legacy_ts, legacy_ts, pd.Timestamp("2020-05-01T20:00:00Z"), pd.Timestamp("2020-05-01T20:00:00Z"),
+                     pd.Timestamp("2019-05-01T20:00:00Z")],
+        "items": ["2.02,9.01"] * 2 + ["8.01"] * 2 + ["1.01"],
+    })
+    ds = datasets.dataset("eightk")
+    ds.path.parent.mkdir(parents=True)
+    legacy.to_parquet(ds.path, index=False)
+    src, _, _ = make(tmp_path, routes(**{TICKERS_URL: tickers(AAA=1000, AAA2=1000),
+                                         sub_url("CIK0000001000.json"): listed_as("AAA", "AAA2")}))
+    frames = src.fetch(ctx())
+    store.write(ds, frames[ds], now=NOW)
+    out = pd.read_parquet(ds.path)
+    assert len(out) >= len(legacy)
+    assert len(out) == len(legacy) + 2  # one new accession, one row per symbol
+    pairs = set(zip(out["symbol"], out["accession"], strict=True))
+    assert {("AAA", "0001000-26-000001"), ("AAA2", "0001000-26-000001"), ("AAA", "0001000-20-000007"),
+            ("AAA2", "0001000-20-000007"), ("AAA", "0001000-26-000003"), ("AAA2", "0001000-26-000003")} <= pairs
+
+
+def test_a_rate_limit_midway_is_resumed_not_restarted(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "events_symbols", lambda: ["BBB", "CCC", "DDD"])
+    monkeypatch.setattr(config, "confirm_symbols", lambda: [])
+    monkeypatch.setattr(config, "sf_symbols", lambda: [])
+    r = routes(**{TICKERS_URL: tickers(AAA=1000, BBB=2000, CCC=3000, DDD=4000),
+                  sub_url("CIK0000003000.json"): 429, sub_url("CIK0000004000.json"): listed_as("DDD")})
+    r[sub_url("CIK0000002000.json")] = listed_as("BBB")
+    src, http, _ = make(tmp_path, r)
+    with pytest.raises(RateLimited):
+        src.fetch(ctx())
+    first = list(http.urls)
+    assert sub_url("CIK0000002000.json") in first and sub_url("CIK0000004000.json") not in first
+    progress = json.loads((config.DATA_DIR / "collect" / "sec_filings_progress.json").read_text())
+    assert progress["date"] == "2026-11-12" and progress["ciks"] == [1000, 2000]
+
+    r[sub_url("CIK0000003000.json")] = listed_as("CCC")
+    http.urls.clear()
+    restarted = SecFilings(client_factory=lambda: EdgarClient(cache_dir=tmp_path / "edgar-cache", http=http))
+    frames = restarted.fetch(ctx())  # a new instance, as after a daemon restart
+    assert http.urls == [sub_url("CIK0000003000.json"), sub_url("CIK0000004000.json")]
+    assert set(frames[datasets.dataset("eightk")]["symbol"]) == {"AAA", "BBB", "CCC", "DDD"}
+    assert not (config.DATA_DIR / "collect" / "sec_filings_progress.json").exists()
+
+
+def test_progress_from_another_day_is_ignored(tmp_path):
+    path = config.DATA_DIR / "collect" / "sec_filings_progress.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"date": "2026-11-11", "tickers": True, "ciks": [1000, 2000]}))
+    src, http, _ = make(tmp_path, routes())
+    src.fetch(ctx())
+    assert http.urls.count(sub_url("CIK0000001000.json")) == 1 and http.urls.count(TICKERS_URL) == 1
+
+
+def test_invalid_json_body_never_overwrites_the_cache(tmp_path):
+    good = json.dumps(old_version())
+
+    class Garbage(FakeHttp):
+        def get(self, url):
+            if url == TICKERS_URL:
+                return super().get(url)
+            self.urls.append(url)
+            return httpx.Response(200, content=b"<html>maintenance</html>", request=httpx.Request("GET", url))
+
+    http = Garbage({TICKERS_URL: tickers(AAA=1000)})
+    cache = tmp_path / "edgar-cache"
+    cache.mkdir()
+    (cache / "CIK0000001000.json").write_text(good)
+    src = SecFilings(client_factory=lambda: EdgarClient(cache_dir=cache, http=http))
+    with pytest.raises(SourceError):
+        src.fetch(ctx())
+    assert http.urls == [TICKERS_URL, sub_url("CIK0000001000.json")]
+    assert (cache / "CIK0000001000.json").read_text() == good
+    assert not list(cache.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("body", [{"error": "Not Found"}, [1, 2]])
+def test_json_without_filings_never_overwrites_the_cache(tmp_path, body):
+    good = json.dumps(old_version())
+    src, _, cache = make(tmp_path, routes(**{sub_url("CIK0000001000.json"): body}))
+    cache.mkdir()
+    (cache / "CIK0000001000.json").write_text(good)
+    with pytest.raises(SourceError):
+        src.fetch(ctx())
+    assert (cache / "CIK0000001000.json").read_text() == good
+    assert not list(cache.glob("*.tmp"))
+
+
+def test_cache_tmp_file_name_is_unique_per_process(tmp_path, monkeypatch):
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda a, b: (seen.append(Path(a).name), real(a, b)))
+    client = EdgarClient(cache_dir=tmp_path, http=FakeHttp({"https://x.test/a": {"v": 1}}))
+    client._get_json("https://x.test/a", "a.json")
+    assert seen == [f"a.json.{os.getpid()}.tmp"]
+
+
+def test_symbol_not_in_the_cik_ticker_list_is_skipped_and_reported(tmp_path, caplog):
+    src, _, _ = make(tmp_path, routes(**{sub_url("CIK0000002000.json"): listed_as("NEWCO")}))
+    with caplog.at_level(logging.INFO, logger="tp.collect.sources.sec"):
+        frames = src.fetch(ctx())
+    assert set(frames[datasets.dataset("eightk")]["symbol"]) == {"AAA"}
+    lines = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO and "sec_filings" in r.getMessage()]
+    assert len(lines) == 1 and "BBB" in lines[0] and "ZZZ" in lines[0]
+
+
+def test_ticker_list_match_is_case_insensitive_and_absent_list_is_accepted(tmp_path):
+    no_list = {k: v for k, v in FIXTURE.items() if k != "tickers"}
+    src, _, _ = make(tmp_path, routes(**{sub_url("CIK0000001000.json"): listed_as("aaa"),
+                                         sub_url("CIK0000002000.json"): no_list}))
+    frames = src.fetch(ctx())
+    assert set(frames[datasets.dataset("eightk")]["symbol"]) == {"AAA", "BBB"}
