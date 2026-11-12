@@ -4,7 +4,9 @@ from __future__ import annotations
 from tp.collect.source import Source
 from tp.collect.sources.alpaca_bars import AlpacaBars
 from tp.collect.sources.finra import FinraShortInterest, FinraShortVolume
+from tp.collect.sources.political import DodAwards, TrumpPosts
 from tp.collect.sources.sec import SecFilings, SecForm4, SecXbrlShares
+from tp.collect.sources.sp500 import Sp500Changes
 
 
 def source_settings(settings: dict, name: str) -> dict:
@@ -29,4 +31,10 @@ def build_sources(settings: dict) -> list[Source]:
     sources.append(FinraShortVolume(cfg["schedule"], cfg["lag_minutes"]))
     cfg = source_settings(settings, "finra_short_interest")
     sources.append(FinraShortInterest(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "dod_awards")
+    sources.append(DodAwards(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "trump_posts")
+    sources.append(TrumpPosts(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "sp500_changes")
+    sources.append(Sp500Changes(cfg["schedule"], cfg["lag_minutes"]))
     return sources

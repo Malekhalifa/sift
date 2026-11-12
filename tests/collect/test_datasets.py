@@ -31,6 +31,9 @@ def test_keys_and_timestamp_columns():
     assert dataset("form4").ts_col == "filing_date"
     assert dataset("dod_awards").key == ("award_id", "action_date", "amount")
     assert dataset("congress_trades").key == ("source_id",)
+    assert dataset("trump_posts").key == ("source", "id") and dataset("trump_posts").ts_col == "ts"
+    assert dataset("sp500_changes").key == ("effective_date", "added", "removed")
+    assert dataset("sp500_changes").ts_col == "effective_date"
     assert dataset("eightk").key == ("symbol", "accession")
     assert dataset("earnings").key == ("symbol", "accession")
     assert dataset("tenk_index").key == ("symbol", "accn")

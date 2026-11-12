@@ -23,6 +23,9 @@ SETTINGS = {"sources": {
     "sec_xbrl_shares": {"schedule": "weekly sun 09:00 America/New_York", "lag_minutes": 0},
     "finra_shortvol": {"schedule": "daily 18:30 America/New_York", "lag_minutes": 0},
     "finra_short_interest": {"schedule": "daily 09:00 America/New_York", "lag_minutes": 0},
+    "dod_awards": {"schedule": "weekly mon 06:00 America/New_York", "lag_minutes": 0},
+    "trump_posts": {"schedule": "daily 07:00 America/New_York", "lag_minutes": 0},
+    "sp500_changes": {"schedule": "weekly sun 10:00 America/New_York", "lag_minutes": 0},
 }}
 
 
