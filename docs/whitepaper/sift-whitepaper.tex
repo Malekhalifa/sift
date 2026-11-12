@@ -720,10 +720,42 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
   \textbf{A clear ``no'' is a result.} It saved capital, and the method now makes the next question cheap to test.
 \end{enumerate}
 
+\section{Addendum: five more tests (M14 to M18)}\label{sec:addendum}
+
+After this report was first written, Sift was extended with a forward data recorder and a survivorship-free stock universe, and five more ideas were tested under the same rules: protocol committed first, one frozen setting, run once, every run counted (304 logged runs in total). Four are cross-sectional monthly long-short baskets (long the top fifth, short the bottom fifth, 5~bps a side, trade at the first open of the month); one is an event study. Sections~\ref{sec:ideas} to~\ref{sec:recommendations} still describe the original twelve ideas.
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}lp{0.22\linewidth}p{0.28\linewidth}p{0.2\linewidth}@{}}
+\toprule
+Milestone & Idea & Result & Verdict\\
+\midrule
+M14 & 8-K bad-news items (879 events) & +0.09\% ±0.32\% per event & Not eligible\\
+M15 & 52-week-high momentum & −0.37\% a month & Not eligible\\
+M16 & FINRA short-sale volume & +0.38\% (primary), +0.34\% (replication) a month & Not eligible: interval spans zero\\
+M17 & Net share issuance & −0.22\% (primary), +0.18\% (replication) a month & Not eligible\\
+M18 & Lazy Prices (10-K risk-factor text) & +0.25\% / +0.12\% a month, 45 months in the book & Inconclusive\\
+\bottomrule
+\end{tabular}
+\caption{Five further pre-registered tests, all run once.}
+\end{table}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{A near miss is not a pass.} Short-sale volume (M16) was positive on both universes and in both halves and failed only because its interval touched zero. Sixty-four months cannot tell it from luck; it could justify a longer, separately pre-registered test, not a re-read of this one.
+\item
+  \textbf{A data bug can fake a result.} M15's replication first read −4.4\% a month because four stocks had reverse splits missing from the split list. The fix (drop stocks with a one-session gain above +100\%) came after seeing the result and is disclosed as a deviation.
+\item
+  \textbf{Too little data is its own verdict.} Lazy Prices populated only 45 of the 48 required months because 10-Ks cluster in February and March, so it is inconclusive, not a failure or a pass.
+\end{itemize}
+
+Seventeen ideas have now been tested and none has passed, so the 2025 and later holdout remains sealed.
+
 \section{Reproducibility}\label{sec:repro}
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(208 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(872 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 \begin{verbatim}
 uv sync

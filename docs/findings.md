@@ -5,6 +5,10 @@
 Report date: 6 November 2026. Status: complete for the free-data scope described below. Data after 2024 has never been
 analysed (see the holdout rule in section 3).
 
+**Update, 12 November 2026:** five more pre-registered tests (M14 to M18) were run on new free data after this report was
+written. None passed. They are summarised in [section 12](#12-addendum-five-more-tests-m14-to-m18); sections 1 to 11 still
+describe the original twelve ideas.
+
 The typeset whitepaper version is [Trading-Research-Findings.pdf](Trading-Research-Findings.pdf); its LaTeX source is
 [whitepaper/sift-whitepaper.tex](whitepaper/sift-whitepaper.tex).
 
@@ -340,7 +344,7 @@ posts -0.12%, where a negative number means the trade direction was wrong.
 <!-- diagram:verdicts -->
 ```mermaid
 flowchart LR
-  R[12 ideas tested] --> G1[No edge even before costs]
+  R[First 12 ideas tested] --> G1[No edge even before costs]
   R --> G2[The gain was the rising market]
   R --> G3[Did not replicate on new stocks]
   R --> G4[Nothing left after the first open]
@@ -463,7 +467,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 ## 10. Reproduce it
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(208 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(872 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 ```sh
 uv sync
@@ -480,6 +484,36 @@ Start with `README.md`, then `docs/m4-protocol.md` for the method and `docs/m*-r
 This is a personal research project. It is not investment advice and recommends no security or strategy. No real money was
 traded. The code, analysis and drafting were done with an AI coding assistant (Claude Code); every number in this report is
 taken from results recorded in the repository, and the protocols' commit order is the evidence of what was decided when.
+
+## 12. Addendum: five more tests (M14 to M18)
+
+After the report above, Sift was extended with a forward data recorder (`tp.collect`, see
+[recorder-runbook.md](recorder-runbook.md)) and a survivorship-free stock universe (Alpaca still serves bars for delisted
+tickers). Five more ideas were then tested under the same rules: protocol committed first, one frozen setting, run once, every
+run counted (304 logged runs in total). Four are cross-sectional monthly long-short baskets (long the top fifth, short the
+bottom fifth, 5 bps a side, trade at the first open of the month); one is an event study.
+
+| Milestone | Idea | Result | Verdict |
+|---|---|---|---|
+| M14 | 8-K bad-news items (event study, 879 events) | +0.09% +-0.32% per event | Not eligible |
+| M15 | 52-week-high momentum | -0.37% a month | Not eligible |
+| M16 | FINRA short-sale volume | +0.38% (primary), +0.34% (replication) a month | Not eligible: the 95% interval spans zero |
+| M17 | Net share issuance | -0.22% (primary), +0.18% (replication) a month | Not eligible |
+| M18 | Lazy Prices (10-K risk-factor text change) | +0.25% / +0.12% a month, 45 months in the book | Inconclusive |
+
+Three things are worth recording:
+
+- **A near miss is not a pass.** Short-sale volume (M16) was positive on both universes and in both halves and failed only
+  because its interval touched zero. Sixty-four months cannot tell it from luck. It could justify a longer, separately
+  pre-registered test; it does not justify re-reading this one.
+- **A data bug can fake a result.** M15's replication first read -4.4% a month because four stocks (EXE, HRI, VAL, OVV) had
+  reverse splits missing from the split list and looked like +12,000% days. The fix was mechanical (drop stocks with a one-session
+  gain above +100%), applied after seeing the result, shown with both runs and disclosed as a deviation in the M15 results.
+- **Too little data is its own verdict.** Lazy Prices could populate only 45 of the 48 required months because 10-Ks cluster in
+  February and March, so it is reported as inconclusive, not as a failure or a pass.
+
+Seventeen ideas have now been tested and none has passed, so the 2025 and later holdout remains sealed. The decision rules
+are written down in [research-workflow.md](research-workflow.md).
 
 ## References
 
