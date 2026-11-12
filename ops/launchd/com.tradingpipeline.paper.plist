@@ -17,7 +17,7 @@
         <string>tp.paper</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/m6l9k/.t3/projects/trading-pipeline</string>
+    <string>/path/to/sift</string>
     <key>StartCalendarInterval</key>
     <array>
         <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
@@ -27,9 +27,9 @@
         <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
     </array>
     <key>StandardOutPath</key>
-    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/paper.log</string>
+    <string>/path/to/sift/data/logs/paper.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/paper.log</string>
+    <string>/path/to/sift/data/logs/paper.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

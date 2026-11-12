@@ -1,9 +1,12 @@
-# Sift: twelve trading ideas, tested honestly on free data
+# Sift: seventeen trading ideas, tested honestly on free data
 
 **A pre-registered negative-results report on short-term US stock strategies**
 
 Report date: 6 November 2026. Status: complete for the free-data scope described below. Data after 2024 has never been
 analysed (see the holdout rule in section 3).
+
+**Update, 12 November 2026:** five more pre-registered tests (M14 to M18) were run on new free data after the first twelve.
+None passed. They are in [section 12](#12-five-more-tests-m14-to-m18); sections 1 to 11 describe the first twelve ideas in detail.
 
 The typeset whitepaper version is [Trading-Research-Findings.pdf](Trading-Research-Findings.pdf); its LaTeX source is
 [whitepaper/sift-whitepaper.tex](whitepaper/sift-whitepaper.tex).
@@ -13,17 +16,17 @@ The typeset whitepaper version is [Trading-Research-Findings.pdf](Trading-Resear
 Online trading videos and social posts are full of strategies that "work". I wanted to know whether any of them survive a
 fair test, starting from $0 and using only free data, so I built **Sift**: a research pipeline that downloads market data,
 turns each trading idea into precise rules, simulates them with realistic costs, and judges them with checks designed to
-catch luck. Over ten test milestones I tested twelve ideas, from opening-range breakouts and RSI reversion to earnings
+catch luck. Over fifteen test milestones I tested seventeen ideas (twelve in the first round, five more on new free data, M14 to M18), from opening-range breakouts and RSI reversion to earnings
 drift, insider buying, volume signals, indicator bots popular in online videos, presidential social-media posts and
 Pentagon contract awards. Every test was written down and committed before it was run, scored out of sample, and
 charged for the number of tries it took to find it.
 
-**None of the twelve ideas met all of its pre-registered criteria.** Several looked promising until the market's own
+**None of the seventeen ideas met all of its pre-registered criteria.** Several looked promising until the market's own
 rise was subtracted or until the idea was repeated on stocks it had never seen. No money was traded, and no idea was
 promoted to paper trading for evidence. The useful output is not a strategy; it is a method, and a short list of ways
 that backtests flatter themselves.
 
-> **The result in one line:** twelve ideas tested, none passed. When something looked like an edge, it was
+> **The result in one line:** seventeen ideas tested, none passed. When something looked like an edge, it was
 > usually the market rising or luck that did not repeat on new stocks. No money was traded.
 
 ## 1. About the project: why and how
@@ -94,7 +97,7 @@ AI coding assistant; the decisions, and every number in this report, trace back 
 - Universe chosen by a fixed rule (median dollar volume in Q1 2016), never by hand: 10 large caps, then 50, 150 and 250
   further stocks (about 410 in total).
 
-## 2. The twelve ideas, in plain words
+## 2. The first twelve ideas, in plain words
 
 Each idea is a belief about how prices behave. A test asks one question: if I had acted on that belief with fixed rules, would
 I have made money after costs, and was that more than just holding the market? The ideas came from four places: classic
@@ -272,7 +275,7 @@ same results as a picture, with their 95% intervals.
 | M12 | Presidential posts naming a listed company | 133 events | -0.05% +-0.60 per event | 1 of 4 |
 | M12 | Large Pentagon awards to listed primes | 933 events | -0.10% +-0.27 per event | 1 of 4 |
 
-![Out-of-sample expectancy per trade for twelve ideas, with 95% confidence intervals](img/forest.svg)
+![Out-of-sample expectancy per trade for the first twelve ideas, with 95% confidence intervals](img/forest.svg)
 
 *Figure 3. Out-of-sample result per trade, in R (profit measured in units of the amount risked). Zero means no edge.
 Grey dots: as tested. Red diamonds: after subtracting what simply holding the market earned over the same dates, a check added
@@ -294,11 +297,11 @@ column counts the pre-registered checks passed (six, or seven from M8 on). Three
   wide enough to hide almost anything.
 - **Positive is not the same as significant.** Only two ideas had an interval entirely above zero before the market was
   subtracted: earnings drift (M7) and high-volume continuation (M11).
-- **Most failures were not close calls.** Seven of the twelve ideas passed only the minimum-trade-count check.
+- **Most failures were not close calls.** Seven of the first twelve ideas passed only the minimum-trade-count check.
 
 ### Which safeguard stopped each idea
 
-The matrix shows, for the twelve strategy tests, which pre-registered check each idea passed (yes) or failed (no); the columns
+The matrix shows, for the first twelve strategy tests, which pre-registered check each idea passed (yes) or failed (no); the columns
 follow the seven checks of section 3. A dash means the check did not exist yet: the market-adjusted comparison was added after
 earnings drift (M7).
 
@@ -340,7 +343,7 @@ posts -0.12%, where a negative number means the trade direction was wrong.
 <!-- diagram:verdicts -->
 ```mermaid
 flowchart LR
-  R[12 ideas tested] --> G1[No edge even before costs]
+  R[First 12 ideas tested] --> G1[No edge even before costs]
   R --> G2[The gain was the rising market]
   R --> G3[Did not replicate on new stocks]
   R --> G4[Nothing left after the first open]
@@ -421,9 +424,10 @@ a holder can sit through matters more than these figures.
 Absence of evidence in these tests is not proof that no edge exists. The scope was narrow:
 
 - **Free data and daily or five-minute bars.** I could not test the first seconds and minutes after news, where fast
-  traders operate, nor order-book or options data, nor paid datasets (earnings estimates, short interest, intraday news).
-- **Large and mid caps only.** Several published effects are strongest in small stocks. I could not test them honestly
-  because free price history omits delisted companies, which biases any such result upward.
+  traders operate, nor order-book or options data, nor paid datasets (earnings estimates, intraday news).
+- **Large and mid caps only.** Several published effects are strongest in small stocks, which were not tested. A
+  survivorship-free universe that includes delisted tickers has since been built, but none of the seventeen tests has yet been
+  rerun on it.
 - **One regime.** 2016 to 2024 is one stretch of one market, dominated by a rise. The holdout (2025 onward) was kept unread
   for a final run that no idea earned.
 - **Survivor and hindsight bias.** The universe is stocks listed today. This was disclosed in each protocol and is why the
@@ -435,8 +439,9 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 
 ## 8. Summary of findings
 
-- **No idea passed.** Of twelve, the closest were earnings drift (5 of 6 checks, then it failed to replicate on 250
-  unseen stocks) and a volume-spike rule (5 of 7 checks, then it turned negative after subtracting the market).
+- **No idea passed.** Of seventeen, the closest were earnings drift (5 of 6 checks, then it failed to replicate on 250
+  unseen stocks), a volume-spike rule (5 of 7 checks, then it turned negative after subtracting the market) and short-sale
+  volume (positive on both universes and both halves, but an interval that spans zero).
 - **When it looked like an edge, it was mostly the market.** Long-only rules were positive in 2019 to 2024 largely
   because stocks rose. Insider buying went from +0.028R to -0.079R, and volume spikes from +0.100R to -0.039R, once the
   market was subtracted.
@@ -463,7 +468,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 ## 10. Reproduce it
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(208 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(872 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 ```sh
 uv sync
@@ -480,6 +485,37 @@ Start with `README.md`, then `docs/m4-protocol.md` for the method and `docs/m*-r
 This is a personal research project. It is not investment advice and recommends no security or strategy. No real money was
 traded. The code, analysis and drafting were done with an AI coding assistant (Claude Code); every number in this report is
 taken from results recorded in the repository, and the protocols' commit order is the evidence of what was decided when.
+
+## 12. Five more tests (M14 to M18)
+
+After the first twelve, Sift was extended with a forward data recorder (`tp.collect`, see
+[recorder-runbook.md](recorder-runbook.md)). A survivorship-free universe that includes delisted tickers was also built (Alpaca
+still serves their bars), but these five tests used the original universes (ranks 1 to 150 and 151 to 400 by 2016 dollar
+volume), and none of the seventeen has yet been rerun on it. Five more ideas were tested under the same rules: protocol committed first, one frozen setting, run once, every
+run counted (304 logged runs in total). Four are cross-sectional monthly long-short baskets (long the top fifth, short the
+bottom fifth, 5 bps a side, trade at the first open of the month); one is an event study.
+
+| Milestone | Idea | Result | Verdict |
+|---|---|---|---|
+| M14 | 8-K bad-news items (event study, 879 events) | +0.09% +-0.32% per event | Not eligible |
+| M15 | 52-week-high momentum | -0.37% a month | Not eligible |
+| M16 | FINRA short-sale volume | +0.38% (primary), +0.34% (replication) a month | Not eligible: the 95% interval spans zero |
+| M17 | Net share issuance | -0.22% (primary), +0.18% (replication) a month | Not eligible |
+| M18 | Lazy Prices (10-K risk-factor text change) | +0.25% / +0.12% a month, 45 months in the book | Inconclusive |
+
+Three things are worth recording:
+
+- **A near miss is not a pass.** Short-sale volume (M16) was positive on both universes and in both halves and failed only
+  because its interval touched zero. Sixty-four months cannot tell it from luck. It could justify a longer, separately
+  pre-registered test; it does not justify re-reading this one.
+- **A data bug can fake a result.** M15's replication first read -4.4% a month because four stocks (EXE, HRI, VAL, OVV) had
+  reverse splits missing from the split list and looked like +12,000% days. The fix was mechanical (drop stocks with a one-session
+  gain above +100%), applied after seeing the result, shown with both runs and disclosed as a deviation in the M15 results.
+- **Too little data is its own verdict.** Lazy Prices could populate only 45 of the 48 required months because 10-Ks cluster in
+  February and March, so it is reported as inconclusive, not as a failure or a pass.
+
+Seventeen ideas have now been tested and none has passed, so the 2025 and later holdout remains sealed. The decision rules
+are written down in [research-workflow.md](research-workflow.md).
 
 ## References
 

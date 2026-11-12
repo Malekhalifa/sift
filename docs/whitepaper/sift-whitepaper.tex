@@ -56,7 +56,7 @@
 % ---------------------------------------------------------------- links and metadata
 \usepackage{hyperref}
 \hypersetup{colorlinks=true,linkcolor=accent,urlcolor=accent,citecolor=accent,
-  pdftitle={Sift: twelve trading ideas, tested honestly on free data},
+  pdftitle={Sift: seventeen trading ideas, tested honestly on free data},
   pdfauthor={Malek Khalifa},
   pdfsubject={A pre-registered negative-results whitepaper on short-term US stock strategies},
   pdfkeywords={backtesting, pre-registration, deflated Sharpe ratio, walk-forward, trading strategies}}
@@ -72,7 +72,7 @@
 \vspace{1.2cm}
 {\color{accent}\rule{\linewidth}{1pt}}\par
 \vspace{0.5cm}
-{\huge\bfseries Twelve Trading Ideas,\\[4pt] Tested Honestly on Free Data\par}
+{\huge\bfseries Seventeen Trading Ideas,\\[4pt] Tested Honestly on Free Data\par}
 \vspace{0.4cm}
 {\Large A Pre-Registered Negative-Results Study\\ of Short-Term US Stock Strategies\par}
 \vspace{0.5cm}
@@ -82,7 +82,7 @@
 \vspace{0.3cm}
 {\large The Sift project \quad\textperiodcentered\quad \href{https://github.com/Malekhalifa/sift}{github.com/Malekhalifa/sift}\par}
 \vspace{0.3cm}
-{\large 6 November 2026\par}
+{\large 6 November 2026, updated 12 November 2026\par}
 \vspace{1.4cm}
 \begin{minipage}{0.88\linewidth}
 \begin{center}\bfseries Abstract\end{center}
@@ -92,9 +92,10 @@ them survive a fair test, starting from \$0 and using only free data. It describ
 downloads market data, turns each trading idea into exact rules, simulates the trades with realistic costs, and judges the
 results with checks designed to catch luck: pre-registration of every protocol before it runs, walk-forward testing,
 an untouched holdout, a count of every configuration tried with a Deflated Sharpe Ratio, a comparison against simply
-holding the market, and replication on unseen stocks. Twelve ideas were tested on up to 410 US stocks from 2016 to 2024:
+holding the market, and replication on unseen stocks. Seventeen ideas were tested on up to 410 US stocks from 2016 to 2024:
 opening-range breakouts and fades, RSI reversion, trend pullbacks, earnings drift, insider buying, two indicator bots
-popular in online videos, volume-conditioned rules, presidential social-media posts and Pentagon contract awards.
+popular in online videos, volume-conditioned rules, presidential social-media posts and Pentagon contract awards, and, on
+new free data added later, 8-K filings, 52-week highs, short-sale volume, share issuance and the wording of 10-K risk factors.
 \textbf{None met all of its pre-registered criteria.} The ideas that looked strongest were either the market's own rise
 or luck that did not repeat on new stocks. The contribution is a method and a set of lessons about how backtests flatter
 themselves, not a strategy.
@@ -116,15 +117,15 @@ results recorded in the project repository, whose commit history records when ea
 \markboth{Executive summary}{}
 
 Sift was built to answer a practical question: can a retail trader with no capital and only free data find a
-short-term edge in US stocks, and prove it before risking money? Twelve ideas were each turned into exact rules, written
-down before testing, and judged out of sample by seven fixed criteria. The 2025 to 2026 data was locked away for a final
+short-term edge in US stocks, and prove it before risking money? Seventeen ideas were each turned into exact rules, written
+down before testing, and judged out of sample by fixed, pre-registered criteria. The 2025 to 2026 data was locked away for a final
 check that no idea earned.
 
 \begin{center}
 \renewcommand{\arraystretch}{1.1}
 \begin{tabular}{@{}*{5}{>{\centering\arraybackslash}p{0.17\linewidth}}@{}}
-{\color{accent}\fontsize{24}{28}\selectfont\bfseries 12} & {\color{accent}\fontsize{24}{28}\selectfont\bfseries 0} &
-{\color{accent}\fontsize{24}{28}\selectfont\bfseries 298} & {\color{accent}\fontsize{24}{28}\selectfont\bfseries 410} &
+{\color{accent}\fontsize{24}{28}\selectfont\bfseries 17} & {\color{accent}\fontsize{24}{28}\selectfont\bfseries 0} &
+{\color{accent}\fontsize{24}{28}\selectfont\bfseries 304} & {\color{accent}\fontsize{24}{28}\selectfont\bfseries 410} &
 {\color{accent}\fontsize{24}{28}\selectfont\bfseries 9} \\[2pt]
 \small ideas tested & \small passed every check & \small configurations counted & \small US stocks at most & \small years of data \\
 \end{tabular}
@@ -140,6 +141,8 @@ check that no idea earned.
       seen.
 \item \textbf{Costs were not the reason.} Several ideas showed no edge even with trading costs set to zero, and the largest
       tests had about 100,000 trades, so the negatives are precise.
+\item \textbf{A near miss is not a pass.} Short-sale volume (M16) was positive on both stock sets and in both halves of the
+      sample and failed only because its interval touched zero; it is reported as not eligible.
 \end{itemize}
 \end{keybox}
 
@@ -150,7 +153,7 @@ no part in choosing the rule. For this project, the free-data, short-term route 
 the next question.
 
 \textbf{How to read this paper.} Section~\ref{sec:intro} explains why Sift was built and how it works,
-Section~\ref{sec:ideas} describes the twelve ideas in plain words, Section~\ref{sec:method} sets out the method,
+Section~\ref{sec:ideas} describes the seventeen ideas in plain words, Section~\ref{sec:method} sets out the method,
 Sections~\ref{sec:results} and~\ref{sec:discussion} report and interpret the results, and Section~\ref{sec:limits} states
 what the study cannot show. A glossary of every abbreviation is in Appendix~\ref{app:glossary}.
 
@@ -231,12 +234,13 @@ AI coding assistant; the decisions, and every number in this report, trace back 
   further stocks (about 410 in total).
 \end{itemize}
 
-\section{The twelve ideas}\label{sec:ideas}
+\section{The seventeen ideas}\label{sec:ideas}
 
 Each idea is a belief about how prices behave. A test asks one question: if I had acted on that belief with fixed rules, would
 I have made money after costs, and was that more than just holding the market? The ideas came from four places: classic
 day-trading lore (ideas 1 to 4), academic research (5, 6, 11 and 12), indicator ``bots'' shown in online videos (9 and 10), and
-the intuition that politics moves stocks (7 and 8).
+the intuition that politics moves stocks (7 and 8). Five more (13 to 17, milestones M14 to M18) came from published factor research
+and were tested after the first twelve, on new free data.
 
 \subsection{Short-term price patterns (minutes to hours, 5-minute bars)}\label{short-term-price-patterns-minutes-to-hours-5-minute-bars}
 
@@ -333,6 +337,35 @@ safer.
 bot, about 10\% for insider buying, 12\% and 8\% for the two volume ideas, and 3\% and 2\% for the two political ones. The
 outcomes were consistent with those priors, and none of the tests was chosen because it was expected to win.
 
+\subsection{Five more ideas on new free data (milestones M14 to M18)}\label{sec:newideas}
+
+After the first twelve, Sift gained a forward data recorder and several new free sources (SEC filings, FINRA short-sale
+volume, XBRL share counts), and five more ideas were tested under the same rules. Four are monthly long-short baskets
+(buy the top fifth of stocks on a signal, short the bottom fifth, 5 basis points a side, trade at the first open of the month);
+one is an event study.
+
+\begin{enumerate}
+\setcounter{enumi}{12}
+\tightlist
+\item
+  \textbf{8-K bad-news items (M14).} \emph{The belief:} a negative company filing keeps pushing the stock down for days.
+  \emph{The test:} short on the next open after items such as defaults, delistings or restatements, hold five sessions.
+\item
+  \textbf{52-week-high momentum (M15).} \emph{The belief:} stocks near their yearly high keep outperforming those far below it.
+  \emph{The test:} long the fifth nearest the high, short the fifth farthest, rebalanced monthly.
+\item
+  \textbf{FINRA short-sale volume (M16).} \emph{The belief:} stocks with a high share of short selling underperform the next
+  month. \emph{The test:} rank by short-sale share of volume, long the lowest fifth, short the highest.
+\item
+  \textbf{Net share issuance (M17).} \emph{The belief:} companies that issue shares underperform those that buy them back.
+  \emph{The test:} rank by one-year change in shares outstanding, long the lowest, short the highest.
+\item
+  \textbf{Lazy Prices (M18).} \emph{The belief:} a company that rewrites the risk-factor section of its annual report is warning of
+  trouble. \emph{The test:} rank by how much Item 1A text changed against the prior year, long the least changed, short the most.
+\end{enumerate}
+
+The first run of M15's replication exposed a data bug, described in Section~\ref{sec:newresults}.
+
 \section{Methodology}\label{sec:method}
 
 Most backtests that look good are noise that was selected. The framework was built to make that hard: Figure \ref{fig:method} shows the
@@ -354,7 +387,7 @@ What it does
 \textbf{Pre-registration} & For each test the protocol, parameter grid and pass criteria were committed to version control before the run. The commit history shows the order, so it cannot be quietly changed afterwards. \\
 \textbf{Walk-forward, out of sample} & Parameters are chosen on earlier years only and judged on the next. Test years were 2019 to 2024. \\
 \textbf{Untouched holdout} & Data from 2025 onward is kept for a single final run, and only for an idea that has already passed everything. The code refuses to read it without an explicit flag. No analysis has read it. \\
-\textbf{Trial counting and Deflated Sharpe} & Every configuration tried is logged (298 in total). The Deflated Sharpe Ratio (Bailey and L\textquotesingle opez de Prado \cite{bailey2014}) asks whether a result still stands after paying for the number of attempts. \\
+\textbf{Trial counting and Deflated Sharpe} & Every configuration tried is logged (298 when the first twelve ideas were judged, 304 after M14 to M18). The Deflated Sharpe Ratio (Bailey and L\textquotesingle opez de Prado \cite{bailey2014}) asks whether a result still stands after paying for the number of attempts. \\
 \textbf{Realistic fills and costs} & Next-bar fills, stops assumed hit first when a bar is ambiguous, gaps filled at the open, per-share slippage on market fills, limit targets that must trade through to fill, stock splits handled at read time, one open trade per symbol. A stress test doubles costs. \\
 \textbf{Market-adjusted check} & Added after earnings drift: each trade's result minus what holding SPY (the exchange-traded fund that tracks the S\&P 500 index) the same way over the same dates would have earned. \\
 \textbf{Replication on unseen stocks} & A single frozen setting is run once on stocks that took no part in choosing it. \\
@@ -431,7 +464,7 @@ means the highest average R minus one standard error, so a setting that did well
 
 The Sharpe ratio measures return per unit of risk. If hundreds of settings are tried, the best of them will have an
 impressive Sharpe ratio by luck alone, even if every one is worthless. The Deflated Sharpe Ratio estimates the probability
-that the best result is genuine after discounting for the number of attempts (298 in total here); the criterion is at least
+that the best result is genuine after discounting for the number of attempts (298 at the time of the first twelve tests; 304 now); the criterion is at least
 0.95. For a single frozen setting tested once on new stocks (M8) there is nothing to deflate for, so the check reduces to the
 probability that the true Sharpe ratio is above zero.
 
@@ -450,7 +483,7 @@ same results as a picture, with their 95\% intervals.
 
 \begin{table}[tbp]
 \centering
-\caption{Out-of-sample results of every test, with the number of pre-registered checks passed.}\label{tbl:results}
+\caption{Out-of-sample results of the first twelve tests, with the number of pre-registered checks passed. M14 to M18 are in Table~\ref{tbl:newresults}.}\label{tbl:results}
 \begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.0988}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.3086}}
@@ -516,12 +549,12 @@ column counts the pre-registered checks passed (six, or seven from M8 on). Three
   \textbf{Positive is not the same as significant.} Only two ideas had an interval entirely above zero before the market was
   subtracted: earnings drift (M7) and high-volume continuation (M11).
 \item
-  \textbf{Most failures were not close calls.} Seven of the twelve ideas passed only the minimum-trade-count check.
+  \textbf{Most failures were not close calls.} Seven of the first twelve ideas passed only the minimum-trade-count check.
 \end{itemize}
 
 \subsection{Which safeguard stopped each idea}\label{which-safeguard-stopped-each-idea}
 
-Table \ref{tbl:matrix} shows, for the twelve strategy tests, which pre-registered check each idea passed (yes) or failed (no); the columns
+Table \ref{tbl:matrix} shows, for the first twelve strategy tests, which pre-registered check each idea passed (yes) or failed (no); the columns
 follow the seven checks of Section \ref{sec:method}. A dash means the check did not exist yet: the market-adjusted comparison was added after
 earnings drift (M7).
 
@@ -566,6 +599,45 @@ positive average in two thirds of the years with at least eight events; and a po
 Posts failed all but the first (average −0.05\%, positive in only 2 of 6 years); awards also failed all but the first (average
 −0.10\%, positive in 5 of 9 years). Splitting the posts by tone changed little: positive posts averaged −0.01\% and negative
 posts −0.12\%, where a negative number means the trade direction was wrong.
+
+\subsection{Five more tests (M14 to M18)}\label{sec:newresults}
+
+Table~\ref{tbl:newresults} gives the five later tests. They use the monthly-basket engine, so the unit is a percentage per month
+(or per event for M14), not R, and the criteria are the ones written into each protocol: enough observations, an interval above zero,
+positive in two thirds of years and in both halves, and replication on unseen stocks.
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}lp{0.22\linewidth}p{0.28\linewidth}p{0.2\linewidth}@{}}
+\toprule
+Test & Idea & Result & Verdict\\
+\midrule
+M14 & 8-K bad-news items (879 events) & +0.09\% ±0.32\% per event & Not eligible\\
+M15 & 52-week-high momentum & −0.37\% a month & Not eligible\\
+M16 & FINRA short-sale volume & +0.38\% (primary), +0.34\% (replication) a month & Not eligible: interval spans zero\\
+M17 & Net share issuance & −0.22\% (primary), +0.18\% (replication) a month & Not eligible\\
+M18 & Lazy Prices (10-K risk-factor text) & +0.25\% / +0.12\% a month, 45 months in the book & Inconclusive\\
+\bottomrule
+\end{tabular}
+\caption{Five further pre-registered tests, each run once. All used the original stock universes (ranks 1 to 150 and 151 to 400 by 2016 dollar volume).}\label{tbl:newresults}
+\end{table}
+
+Three things are worth recording:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{A near miss is not a pass.} Short-sale volume (M16) was positive on both universes and in both halves and failed only
+  because its interval touched zero. Sixty-four months cannot tell it from luck. It could justify a longer, separately
+  pre-registered test; it does not justify re-reading this one.
+\item
+  \textbf{A data bug can fake a result.} M15's replication first read −4.4\% a month because four stocks had reverse splits
+  missing from the split list and looked like +12,000\% days. The fix (drop stocks with a one-session gain above +100\%) came after
+  seeing the result, and is disclosed as a deviation with both runs shown.
+\item
+  \textbf{Too little data is its own verdict.} Lazy Prices populated only 45 of the 48 required months because 10-Ks cluster in
+  February and March, so it is reported as inconclusive, not as a failure or a pass.
+\end{itemize}
 
 \section{Discussion: what kept recurring}\label{sec:discussion}
 
@@ -655,15 +727,16 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 \tightlist
 \item
   \textbf{Free data and daily or five-minute bars.} I could not test the first seconds and minutes after news, where fast
-  traders operate, nor order-book or options data, nor paid datasets (earnings estimates, short interest, intraday news).
+  traders operate, nor order-book or options data, nor paid datasets (earnings estimates, intraday news).
 \item
-  \textbf{Large and mid caps only.} Several published effects are strongest in small stocks. I could not test them honestly
-  because free price history omits delisted companies, which biases any such result upward.
+  \textbf{Large and mid caps only.} Several published effects are strongest in small stocks, which were not tested. A
+  survivorship-free universe that includes delisted tickers has since been built (the free data source does serve their bars),
+  but none of the seventeen tests has yet been rerun on it.
 \item
   \textbf{One regime.} 2016 to 2024 is one stretch of one market, dominated by a rise. The holdout (2025 onward) was kept unread
   for a final run that no idea earned.
 \item
-  \textbf{Survivor and hindsight bias.} The universe is stocks listed today. This was disclosed in each protocol and is why the
+  \textbf{Survivor and hindsight bias.} The universes are stocks listed today. This was disclosed in each protocol and is why the
   market-adjusted check matters.
 \item
   \textbf{Clustering.} Events bunch in market selloffs, so confidence intervals are somewhat optimistic about independence.
@@ -678,8 +751,9 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 \begin{itemize}
 \tightlist
 \item
-  \textbf{No idea passed.} Of twelve, the closest were earnings drift (5 of 6 checks, then it failed to replicate on 250
-  unseen stocks) and a volume-spike rule (5 of 7 checks, then it turned negative after subtracting the market).
+  \textbf{No idea passed.} Of seventeen, the closest were earnings drift (5 of 6 checks, then it failed to replicate on 250
+  unseen stocks), a volume-spike rule (5 of 7 checks, then it turned negative after subtracting the market) and short-sale
+  volume (positive on both universes, but with an interval that spans zero).
 \item
   \textbf{When it looked like an edge, it was mostly the market.} Long-only rules were positive in 2019 to 2024 largely
   because stocks rose. Insider buying went from +0.028R to −0.079R, and volume spikes from +0.100R to −0.039R, once the
@@ -723,7 +797,7 @@ Absence of evidence in these tests is not proof that no edge exists. The scope w
 \section{Reproducibility}\label{sec:repro}
 
 Everything is in the project repository: code, each protocol (committed before its run), each result write-up and the tests
-(208 passing). Data is not redistributed; the scripts fetch it from the free sources above.
+(872 passing). Data is not redistributed; the scripts fetch it from the free sources above.
 
 \begin{verbatim}
 uv sync
@@ -794,6 +868,11 @@ M10 & Insider buying & \texttt{\footnotesize m10-insider-protocol} & \texttt{\fo
 M11 & Volume reversal and continuation & \texttt{\footnotesize m11-volume-protocol} & \texttt{\footnotesize m11-volume-results} \\
 M12 & Presidential posts, Pentagon awards & \texttt{\footnotesize m12-political-protocol} & \texttt{\footnotesize m12-political-results} \\
 M13 & 200-day trend filter on SPY & \texttt{\footnotesize m13-trend-filter-protocol} & \texttt{\footnotesize m13-trend-filter-results} \\
+M14 & 8-K bad-news items & \texttt{\footnotesize m14-eightk-protocol} & \texttt{\footnotesize m14-eightk-results} \\
+M15 & 52-week-high momentum & \texttt{\footnotesize m15-high52-protocol} & \texttt{\footnotesize m15-high52-results} \\
+M16 & FINRA short-sale volume & \texttt{\footnotesize m16-shortvol-protocol} & \texttt{\footnotesize m16-shortvol-results} \\
+M17 & Net share issuance & \texttt{\footnotesize m17-issuance-protocol} & \texttt{\footnotesize m17-issuance-results} \\
+M18 & Lazy Prices (10-K risk-factor text) & \texttt{\footnotesize m18-lazyprices-protocol} & \texttt{\footnotesize m18-lazyprices-results} \\
 \bottomrule
 \end{tabular}
 \end{table}

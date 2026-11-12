@@ -299,7 +299,7 @@ Existing `scripts/fetch_*.py` keep their command lines; their logic moves into t
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement** modelled on `quantstack-data/app/p2-recorder/tools/local_stack.py` (read it; do not import it). The runbook covers install, status, uninstall, what each alert means, and what to do when the Mac was asleep.
 - [ ] **Step 4: Run** the full suite: `uv run pytest -q` → all green.
 - [ ] **Step 5: Commit** `Add the launchd installer, alert rules, and runbook`.
-- [ ] **Step 6: Wire the monitoring (needs the user's go-ahead):** show the user the exact diff for quantstack's `prometheus.yml` (a `sift` scrape job targeting `127.0.0.1:9120`) and `rule_files` line (`/Users/m6l9k/.t3/projects/trading-pipeline/deploy/sift_alerts.yml`), apply it only after a yes, then `curl -s localhost:9090/api/v1/targets` shows the job `up` and `sift_*` series appear.
+- [ ] **Step 6: Wire the monitoring (needs the user's go-ahead):** show the user the exact diff for quantstack's `prometheus.yml` (a `sift` scrape job targeting `127.0.0.1:9120`) and `rule_files` line (`<repo>/deploy/sift_alerts.yml`), apply it only after a yes, then `curl -s localhost:9090/api/v1/targets` shows the job `up` and `sift_*` series appear.
 - [ ] **Step 7: Acceptance (a week, not a single run):** `local_stack.py install --dry-run`, then install; after 7 days with no human action, `status` shows every enabled source fresh, `data/qa/*.json` has no unexplained failure, and one deliberately stopped daemon (`launchctl stop com.sift.recorder`) produced a Telegram alert and recovered by itself. Record the result in `docs/recorder-runbook.md`.
 
 ---

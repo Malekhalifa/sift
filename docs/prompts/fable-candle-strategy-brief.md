@@ -4,7 +4,7 @@ You are advising on a personal, self-funded research project that tests short-te
 under strict anti-overfitting rules. I want your **analysis and design**, not code and not backtests. Your one
 deliverable is a markdown file at
 
-    /Users/m6l9k/.t3/projects/trading-pipeline/docs/ideas/candle-strategies.md
+    docs/ideas/candle-strategies.md
 
 Write for a reader who is smart but not a quant: plain language, short paragraphs, tables where they help, every
 technical term explained the first time.
@@ -15,9 +15,9 @@ A pipeline that records market data, backtests rules, and (much later, only afte
 and then trades real money. Start capital is $0 and nothing has been put at risk. Read these first, they are
 short:
 
-- /Users/m6l9k/.t3/projects/trading-pipeline/README.md
-- /Users/m6l9k/.t3/projects/trading-pipeline/docs/m4-protocol.md, m4-results.md, m4b-results.md, m6-swing-protocol.md, m6-results.md (same folder)
-- Skim /Users/m6l9k/.t3/projects/trading-pipeline/src/tp/backtest.py and src/tp/swing.py (module docstrings define the fill model), and src/tp/strategies/*.py for the style of rule we already test.
+- README.md
+- docs/m4-protocol.md, m4-results.md, m4b-results.md, m6-swing-protocol.md, m6-results.md (same folder)
+- Skim src/tp/backtest.py and src/tp/swing.py (module docstrings define the fill model), and src/tp/strategies/*.py for the style of rule we already test.
 
 Already tested properly, with every pre-registered check failed, on 10 to 60 liquid large-cap stocks, 2016-2024:
 

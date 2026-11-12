@@ -16,7 +16,7 @@
         <string>tp.recorder</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/m6l9k/.t3/projects/trading-pipeline</string>
+    <string>/path/to/sift</string>
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
@@ -25,9 +25,9 @@
         <integer>0</integer>
     </dict>
     <key>StandardOutPath</key>
-    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/recorder.log</string>
+    <string>/path/to/sift/data/logs/recorder.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/m6l9k/.t3/projects/trading-pipeline/data/logs/recorder.log</string>
+    <string>/path/to/sift/data/logs/recorder.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
