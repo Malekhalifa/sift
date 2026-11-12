@@ -1,4 +1,4 @@
-# Settings for the tp.collect recorder daemon. Schedule text is parsed by tp.collect.schedule.parse_schedule
+# Settings for the tp.collect recorder daemon. Schedule text is parsed by tp.collect.source.parse_schedule
 # (timezone defaults to America/New_York when omitted).
 
 [metrics]
