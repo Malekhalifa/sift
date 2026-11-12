@@ -32,13 +32,19 @@ def issuance_by_filing(filings: pd.DataFrame, splits: pd.DataFrame) -> pd.DataFr
     return pd.DataFrame(out, columns=["filed", "issuance"])
 
 
+def latest_known(values: pd.DataFrame, sessions: pd.DatetimeIndex, stale_days: int = STALE_DAYS) -> pd.Series:
+    """For each session date: the `value` of the latest filing (column `filed`) filed strictly before that date and no
+    more than `stale_days` earlier. NaN where none."""
+    if values.empty:
+        return pd.Series(np.nan, index=sessions)
+    vals = values.assign(filed=values["filed"].astype("datetime64[ns]")).sort_values("filed").drop_duplicates("filed", keep="last")
+    left = pd.DataFrame({"date": pd.DatetimeIndex(sessions).astype("datetime64[ns]")})
+    m = pd.merge_asof(left, vals, left_on="date", right_on="filed", direction="backward", allow_exact_matches=False)
+    fresh = (m["date"] - m["filed"]).dt.days <= stale_days
+    return pd.Series(np.where(fresh, m["value"], np.nan), index=sessions)
+
+
 def signal_at(issuance: pd.DataFrame, sessions: pd.DatetimeIndex) -> pd.Series:
     """For each session date: minus the issuance of the latest filing filed strictly before that date and no more than
     STALE_DAYS earlier (highest = fewest new shares). NaN where none."""
-    if issuance.empty:
-        return pd.Series(np.nan, index=sessions)
-    iss = issuance.assign(filed=issuance["filed"].astype("datetime64[ns]")).sort_values("filed").drop_duplicates("filed", keep="last")
-    left = pd.DataFrame({"date": pd.DatetimeIndex(sessions).astype("datetime64[ns]")})
-    m = pd.merge_asof(left, iss, left_on="date", right_on="filed", direction="backward", allow_exact_matches=False)
-    fresh = (m["date"] - m["filed"]).dt.days <= STALE_DAYS
-    return pd.Series(np.where(fresh, -m["issuance"], np.nan), index=sessions)
+    return latest_known(issuance.rename(columns={"issuance": "value"}).assign(value=lambda d: -d["value"]) if not issuance.empty else issuance, sessions)

@@ -21,12 +21,12 @@ def month_starts(index: pd.DatetimeIndex) -> list[int]:
 
 
 def monthly_spread(open_: pd.DataFrame, close: pd.DataFrame, market_open: pd.Series, first_rebalance: str,
-                   signal: pd.DataFrame | None = None) -> pd.DataFrame:
+                   signal: pd.DataFrame | None = None, min_ranked: int = 0) -> pd.DataFrame:
     """One row per month: long-short net return, legs, cost, turnover, market return.
 
     Signal = nearness at the previous session's close; trade at the first session's open of the month; hold to the next
     month's first-session open. Quintile size is round(ranked / 5). Only months whose exit open exists are returned.
-    `signal` (same shape as open_, known at each session's close; highest is longed) replaces nearness to the high, so
+    `min_ranked` skips months with fewer ranked stocks. `signal` (same shape as open_, known at each session's close; highest is longed) replaces nearness to the high, so
     other cross-sectional ideas (M16) reuse the same basket, cost and timing rules.
     """
     near = nearness(close) if signal is None else signal
@@ -40,7 +40,7 @@ def monthly_spread(open_: pd.DataFrame, close: pd.DataFrame, market_open: pd.Ser
         ret = open_.iloc[exit_pos] / open_.iloc[pos] - 1
         ranked = pd.DataFrame({"near": sig, "ret": ret}).dropna().sort_index()
         n = round(len(ranked) / 5)
-        if n < 2:
+        if n < 2 or len(ranked) < min_ranked:
             continue
         ordered = ranked.sort_values("near", ascending=False, kind="stable")
         top, bottom = ordered.iloc[:n], ordered.iloc[-n:]
