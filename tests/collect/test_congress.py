@@ -76,21 +76,30 @@ PER_EVENT = {"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEv
     "trade": {"eventTitle": "A trade", "eventPriceUsd": 0.005}}}}
 
 
+LIMITS = {"data": {"current": {"monthlyUsageUsd": 0.0}, "limits": {"maxMonthlyUsageUsd": 5.0}}}
+
+
 class FakeApify:
     """Plays the parts of the Apify REST API that the source uses and records every request it receives."""
 
-    def __init__(self, items=None, run=None, polls=None, details=None, start_status=201):
+    def __init__(self, items=None, run=None, polls=None, details=None, start_status=201, limits=None,
+                 abort_status="ABORTED", poll_failures=0):
         self.items = [trade(0), trade(1)] if items is None else items
         self.run = run or run_object()
         self.polls = polls or []  # statuses answered before the final run object
         self.details = details if details is not None else pricing(PER_EVENT)
         self.start_status = start_status
+        self.limits = limits if limits is not None else LIMITS
+        self.abort_status = abort_status
+        self.poll_failures = poll_failures
         self.requests: list[httpx.Request] = []
         self.abort_cost = 0.01
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
+        if request.method == "GET" and path == "/v2/users/me/limits":
+            return self._reply(self.limits)
         if request.method == "GET" and path.startswith("/v2/acts/") and not path.endswith("/runs"):
             return self._reply(self.details)
         if request.method == "POST" and path.endswith("/runs"):
@@ -99,9 +108,12 @@ class FakeApify:
             return self._reply(run_object("RUNNING", None, rid=self.run["data"]["id"]), 201)
         if request.method == "POST" and path.endswith("/abort"):
             self.polls.clear()
-            self.run = run_object("ABORTED", self.abort_cost, rid=self.run["data"]["id"])
+            self.run = run_object(self.abort_status, self.abort_cost, rid=self.run["data"]["id"])
             return self._reply(self.run)
         if request.method == "GET" and path.startswith("/v2/actor-runs/"):
+            if self.poll_failures:
+                self.poll_failures -= 1
+                return self._reply({"error": "blip"}, 503)
             if self.polls:
                 return self._reply(run_object(self.polls.pop(0), None, rid=self.run["data"]["id"]))
             return self._reply(self.run)
@@ -121,6 +133,18 @@ class FakeApify:
 
     def starts(self) -> list[httpx.Request]:
         return self.calls("POST", "/runs")
+
+    def fail_on(self, match, exc: Exception) -> None:
+        """Make every request for which `match(request)` is true raise `exc` instead of being answered."""
+        base = self.handler
+
+        def hostile(request: httpx.Request) -> httpx.Response:
+            if match(request):
+                self.requests.append(request)
+                raise exc
+            return base(request)
+
+        self.client = lambda: httpx.Client(transport=httpx.MockTransport(hostile))
 
 
 class Clock:
@@ -248,6 +272,7 @@ def test_every_run_sets_a_max_charge_equal_to_the_daily_cap():
     query = parse_qs(start.url.query.decode())
     assert float(query["maxTotalChargeUsd"][0]) == 0.05
     assert json.loads(start.content) == {"lookbackDays": 7, "maxItems": 10}
+    assert query["maxItems"] == ["10"]
     assert start.url.path == "/v2/acts/someone~congress-feed/runs"
 
     other, api2 = make()
@@ -335,12 +360,13 @@ def test_a_second_fetch_the_same_utc_day_makes_no_http_call_and_returns_no_rows(
     assert again.empty and len(api.requests) == n
 
 
-def test_a_run_that_never_started_does_not_use_up_the_day():
-    api = FakeApify(start_status=500)
+@pytest.mark.parametrize("status", [400, 401, 402, 403, 404])
+def test_a_definite_rejection_of_the_start_releases_the_reservation_and_the_day(status):
+    api = FakeApify(start_status=status)
     src, _ = make(api)
-    with pytest.raises(SourceError):
+    with pytest.raises(SourceError, match=str(status)):
         frame(src)
-    assert ledger().month_total(NOW) == 0.0
+    assert ledger().month_total(NOW) == 0.0 and not ledger().started_on(NOW) and ledger().is_empty()
     api.start_status = 201
     assert len(frame(src)) == 2
 
@@ -350,6 +376,7 @@ def test_rate_limit_on_start_maps_to_rate_limited():
     with pytest.raises(RateLimited) as e:
         frame(src)
     assert e.value.retry_after_s == 600 and KEY not in str(e.value)
+    assert ledger().month_total(NOW) == 0.0 and not ledger().started_on(NOW)
 
 
 # ---- pricing check ------------------------------------------------------------------------------------------------
@@ -398,15 +425,18 @@ def test_first_run_proceeds_when_pricing_fits_and_the_pricing_is_not_asked_again
     assert api2.calls("GET", "congress-feed") == [] and len(api2.starts()) == 1
 
 
-@pytest.mark.parametrize("details", [{"data": {}}, {"data": {"pricingInfos": []}}, {"unexpected": 1},
-                                     pricing({"pricingModel": "FREE"}), pricing({"pricingModel": "PAY_PER_EVENT"})])
-def test_undeterminable_pricing_still_runs_under_the_hard_caps(details):
+@pytest.mark.parametrize("details", [
+    {"data": {}}, {"data": {"pricingInfos": []}}, {"unexpected": 1}, pricing({"pricingModel": "FREE"}),
+    pricing({"pricingModel": "PAY_PER_EVENT"}), pricing({"pricingModel": "FLAT_PRICE_PER_MONTH",
+                                                         "pricePerUnitUsd": 9.0}),
+    pricing({"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {"x": {"eventTitle": "t"}}}}),
+])
+def test_unknown_or_non_event_pricing_is_refused_before_any_run(details):
     api = FakeApify(details=details)
     src, _ = make(api)
-    assert len(frame(src)) == 2
-    (start,) = api.starts()
-    assert float(parse_qs(start.url.query.decode())["maxTotalChargeUsd"][0]) == 0.05
-    assert json.loads(start.content)["maxItems"] == 10
+    with pytest.raises(SourceError, match="pricing"):
+        frame(src)
+    assert api.starts() == [] and ledger().month_total(NOW) == 0.0 and ledger().is_empty()
 
 
 # ---- the secret ---------------------------------------------------------------------------------------------------
@@ -427,7 +457,7 @@ def test_every_request_carries_the_key_only_in_the_authorization_header():
 BODY_WITH_KEY = f'{{"error": "bad token {KEY} sent as Bearer {KEY}"}}' + " pad" * 200
 
 
-@pytest.mark.parametrize("where", ["start", "details", "poll", "items"])
+@pytest.mark.parametrize("where", ["limits", "start", "details", "poll", "items"])
 @pytest.mark.parametrize("failure", ["status", "transport", "bad-json"])
 def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog):
     api = FakeApify()
@@ -437,6 +467,7 @@ def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog)
         path = request.url.path
         target = {
             "start": request.method == "POST" and path.endswith("/runs"),
+            "limits": request.method == "GET" and path == "/v2/users/me/limits",
             "details": request.method == "GET" and path.startswith("/v2/acts/"),
             "poll": request.method == "GET" and path.startswith("/v2/actor-runs/"),
             "items": request.method == "GET" and path.startswith("/v2/datasets/"),
@@ -458,7 +489,7 @@ def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog)
     for text in (str(err), repr(err), rendered, caplog.text, *(r.getMessage() for r in caplog.records),
                  *(str(r.__dict__) for r in caplog.records)):
         assert KEY not in text
-    assert err.__cause__ is None
+    assert err.__cause__ is None and err.__context__ is None
     if failure == "status":
         assert "401" in str(err) and len(str(err)) < 400
 
@@ -695,3 +726,334 @@ def test_build_sources_registers_it_when_enabled_and_skips_it_when_disabled():
     assert isinstance(found, CongressTrades) and found.schedule.at.hour == 8
     off = with_congress(enabled=False)
     assert "congress_trades" not in [s.name for s in build_sources(off)]
+
+
+# ---- reserve, then settle -----------------------------------------------------------------------------------------
+
+
+def is_start(request: httpx.Request) -> bool:
+    return request.method == "POST" and request.url.path.endswith("/runs")
+
+
+def test_reserve_is_one_atomic_write_of_the_cap_and_the_day_marker(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.reserve(NOW, 0.05)
+    assert json.loads((tmp_path / "l.json").read_text()) == {"months": {"2026-11": 0.05}, "started": ["2026-11-12"]}
+    assert led.started_on(NOW) and led.month_total(NOW) == pytest.approx(0.05) and not led.is_empty()
+
+
+def test_settle_books_the_difference_between_actual_and_reserved(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 1.0)
+    led.reserve(NOW, 0.05)
+    led.settle(NOW, 0.0312, 0.05)
+    assert led.month_total(NOW) == pytest.approx(1.0312)
+    led.reserve(NOW, 0.05)
+    led.settle(NOW, 0.07, 0.05)  # an overrun is booked too
+    assert led.month_total(NOW) == pytest.approx(1.0312 + 0.07)
+    before = led.month_total(NOW)
+    led.settle(NOW, None, 0.05)  # unknown actual: the reservation stays
+    assert led.month_total(NOW) == before
+    with pytest.raises(ValueError):
+        led.settle(NOW, -1.0, 0.05)
+
+
+def test_release_takes_back_the_reservation_and_the_day(tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 1.0)
+    led.reserve(NOW, 0.05)
+    led.release(NOW, 0.05)
+    assert led.month_total(NOW) == pytest.approx(1.0) and not led.started_on(NOW)
+    SpendLedger(tmp_path / "e.json").release(NOW, 0.05)  # never goes negative
+
+
+def test_the_ledger_file_is_fsynced_before_it_replaces_the_old_one(monkeypatch, tmp_path):
+    calls = []
+    real = os.fsync
+    monkeypatch.setattr(cg.os, "fsync", lambda fd: (calls.append(fd), real(fd))[1])
+    SpendLedger(tmp_path / "l.json").add(NOW, 0.1)
+    assert len(calls) == 1
+
+
+def test_the_reservation_is_booked_before_the_start_request_is_sent():
+    api = FakeApify()
+    seen = []
+    base = api.handler
+
+    def spy(request):
+        if is_start(request):
+            seen.append((ledger().month_total(NOW), ledger().started_on(NOW)))
+        return base(request)
+
+    api.client = lambda: httpx.Client(transport=httpx.MockTransport(spy))
+    src, _ = make(api)
+    frame(src)
+    assert seen == [(pytest.approx(0.05), True)]
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)  # settled to the actual cost
+
+
+@pytest.mark.parametrize("exc", [httpx.ReadTimeout("slow"), httpx.RemoteProtocolError("hung up"),
+                                 httpx.ConnectError("refused")])
+def test_a_transport_error_on_the_start_keeps_the_reservation_and_blocks_a_same_day_retry(exc):
+    api = FakeApify()
+    api.fail_on(is_start, exc)
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+    assert len(api.starts()) == 1
+    for later in (timedelta(seconds=60), timedelta(seconds=180), timedelta(hours=5)):
+        assert frame(src, ctx(now=NOW + later)).empty
+    assert len(api.starts()) == 1 and ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_a_5xx_on_the_start_keeps_the_reservation(status):
+    api = FakeApify(start_status=status)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=str(status)):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+    assert frame(src, ctx(now=NOW + timedelta(minutes=2))).empty and len(api.starts()) == 1
+
+
+def test_a_start_reply_without_a_run_id_keeps_the_reservation():
+    api = FakeApify()
+    base = api.handler
+    api.client = lambda: httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(201, json={"data": {}}) if is_start(r) else base(r)))
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="run id"):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+
+
+@pytest.mark.parametrize("method", ["reserve", "add"])
+def test_when_the_reservation_cannot_be_written_no_run_is_started(monkeypatch, method):
+    def broken(self, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(SpendLedger, "reserve", broken)
+    api = FakeApify()
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="reserve"):
+        frame(src)
+    assert api.starts() == []
+
+
+def test_a_reservation_that_fails_midway_leaves_the_old_ledger_intact(monkeypatch, tmp_path):
+    led = SpendLedger(tmp_path / "l.json")
+    led.add(NOW, 1.0)
+    monkeypatch.setattr(cg.os, "replace", lambda *a: (_ for _ in ()).throw(OSError("no")))
+    with pytest.raises(OSError):
+        led.reserve(NOW, 0.05)
+    monkeypatch.undo()
+    assert led.month_total(NOW) == pytest.approx(1.0) and not led.started_on(NOW)
+    assert [p.name for p in tmp_path.iterdir()] == ["l.json"]
+
+
+def test_a_crash_after_the_start_leaves_the_reservation_in_the_ledger():
+    api = FakeApify()
+    api.fail_on(lambda r: r.method == "GET" and r.url.path.startswith("/v2/actor-runs/"), RuntimeError(f"boom {KEY}"))
+    src, _ = make(api)
+    with pytest.raises(SourceError) as e:
+        frame(src)
+    assert KEY not in str(e.value)
+    assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
+    assert frame(src, ctx(now=NOW + timedelta(minutes=5))).empty and len(api.starts()) == 1
+
+
+def test_a_run_still_not_terminal_after_the_abort_keeps_the_full_reservation():
+    api = FakeApify(polls=["RUNNING"] * 1000, abort_status="ABORTING")
+    api.abort_cost = 0.01
+    src, _ = make(api, clock=Clock(step=30.0))
+    with pytest.raises(SourceError, match="did not finish"):
+        frame(src)
+    assert len(api.calls("POST", "/abort")) == 1
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+    api2 = FakeApify(polls=["RUNNING"] * 1000, abort_status="RUNNING")
+    api2.abort_cost = 0.09  # a higher reported cost raises the booking
+    src2, _ = make(api2, clock=Clock(step=30.0))
+    with pytest.raises(SourceError):
+        frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert ledger().month_total(NOW) == pytest.approx(0.05 + 0.09)
+
+
+def test_a_terminal_run_without_a_reported_cost_keeps_the_reservation():
+    src, _ = make(FakeApify(run=run_object("FAILED", cost=None)))
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+def test_a_settle_that_cannot_be_written_is_an_error_and_the_reservation_stands(monkeypatch):
+    def broken(self, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(SpendLedger, "settle", broken)
+    src, _ = make()
+    with pytest.raises(SourceError, match="settle"):
+        frame(src)
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+# ---- status polls -------------------------------------------------------------------------------------------------
+
+
+def test_a_failed_status_read_is_retried_before_the_run_is_given_up_on():
+    api = FakeApify(poll_failures=2)
+    src, _ = make(api)
+    assert len(frame(src)) == 2
+    assert api.calls("POST", "/abort") == [] and ledger().month_total(NOW) == pytest.approx(0.0312)
+
+
+def test_status_reads_that_keep_failing_abort_the_run_and_keep_the_reservation():
+    api = FakeApify(poll_failures=100, abort_status="ABORTING")
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="503"):
+        frame(src)
+    assert len(api.calls("POST", "/abort")) == 1
+    assert ledger().month_total(NOW) == pytest.approx(0.05)
+
+
+# ---- the account and the ledger ----------------------------------------------------------------------------------
+
+
+def limits(usage=0.0, limit=5.0) -> dict:
+    return {"data": {"current": {"monthlyUsageUsd": usage}, "limits": {"maxMonthlyUsageUsd": limit}}}
+
+
+def test_the_account_usage_is_read_with_the_bearer_header_before_every_start():
+    api = FakeApify()
+    src, _ = make(api)
+    frame(src)
+    frame(src, ctx(now=NOW + timedelta(days=1)))
+    reads = api.calls("GET", "/limits")
+    assert len(reads) == 2 and all(r.headers["authorization"] == f"Bearer {KEY}" for r in reads)
+    assert api.requests.index(reads[0]) < api.requests.index(api.starts()[0])
+
+
+@pytest.mark.parametrize("body", [limits(3.96), limits(4.0), limits(2.99, 3.0), limits(1.0, 0.0)])
+def test_a_run_is_refused_when_the_accounts_real_usage_would_pass_the_cap(body):
+    api = FakeApify(limits=body)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="refusing"):
+        frame(src)
+    assert api.starts() == [] and ledger().is_empty() and api.calls("GET", "congress-feed") == []
+
+
+@pytest.mark.parametrize("body", [limits(3.95), limits(0.0, 3.05), limits(0.0)])
+def test_a_run_goes_ahead_when_usage_plus_the_daily_cap_fits(body):
+    api = FakeApify(limits=body)
+    src, _ = make(api)
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+@pytest.mark.parametrize("body", [{}, {"data": {}}, {"data": {"current": {}, "limits": {}}},
+                                  {"data": {"current": {"monthlyUsageUsd": "1"}, "limits": {"maxMonthlyUsageUsd": 5}}},
+                                  {"data": {"current": {"monthlyUsageUsd": 1}}}, [], "x"])
+def test_missing_or_malformed_usage_fields_fail_closed(body):
+    api = FakeApify(limits=body)
+    src, _ = make(api)
+    with pytest.raises(SourceError, match="limits"):
+        frame(src)
+    assert api.starts() == [] and ledger().is_empty()
+
+
+def test_a_failed_usage_read_fails_closed():
+    api = FakeApify()
+    api.fail_on(lambda r: r.url.path == "/v2/users/me/limits", httpx.ReadTimeout("slow"))
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert api.starts() == [] and ledger().is_empty()
+    api2 = FakeApify()
+    api2.fail_on(lambda r: r.url.path == "/v2/users/me/limits", RuntimeError("x"))
+    src2, _ = make(api2)
+    with pytest.raises(SourceError):
+        frame(src2)
+    assert api2.starts() == []
+    unauthorized = FakeApify()
+    base = unauthorized.handler
+    unauthorized.client = lambda: httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(401, json={}) if r.url.path == "/v2/users/me/limits" else base(r)))
+    src3, _ = make(unauthorized)
+    with pytest.raises(SourceError, match="401"):
+        frame(src3)
+    assert unauthorized.starts() == []
+
+
+MISSING = "ledger missing but earlier runs exist"
+
+
+def test_a_missing_ledger_is_refused_when_the_state_file_shows_an_earlier_success(tmp_data_dir):
+    from tp.collect.state import State
+
+    State().record_success("congress_trades", NOW - timedelta(days=1), 3)
+    api = FakeApify()
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=MISSING):
+        frame(src)
+    assert api.requests == [] and not cg.ledger_path().exists()
+
+
+def test_a_missing_ledger_is_refused_when_the_dataset_file_exists():
+    ds = datasets.dataset("congress_trades")
+    ds.path.parent.mkdir(parents=True, exist_ok=True)
+    ds.path.write_bytes(b"x")
+    api = FakeApify()
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=MISSING):
+        frame(src)
+    assert api.requests == []
+
+
+def test_a_missing_ledger_with_no_earlier_run_is_a_normal_first_run(tmp_data_dir):
+    from tp.collect.state import State
+
+    State().record_success("sec_filings", NOW, 3)  # another source's success is no evidence
+    src, api = make()
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+def test_an_existing_ledger_with_earlier_runs_is_fine(tmp_data_dir):
+    from tp.collect.state import State
+
+    State().record_success("congress_trades", NOW - timedelta(days=1), 3)
+    ledger().add(NOW - timedelta(days=1), 0.03)
+    src, api = make()
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+# ---- small things -------------------------------------------------------------------------------------------------
+
+
+def test_a_missing_key_creates_no_http_client():
+    created = []
+    api = FakeApify()
+    src = CongressTrades(http_factory=lambda: created.append(1) or api.client(), key_provider=lambda: (_ for _ in ()).throw(
+        ValueError("APIFY_API_KEY is not set")))
+    with pytest.raises(SourceError, match="APIFY_API_KEY"):
+        frame(src)
+    assert created == []
+
+
+def test_the_http_client_is_closed_after_a_refusal():
+    closed = []
+    api = FakeApify(limits=limits(4.0))
+
+    def factory():
+        client = api.client()
+        real = client.close
+        client.close = lambda: (closed.append(1), real())[1]
+        return client
+
+    src = CongressTrades(http_factory=factory, key_provider=lambda: KEY, monotonic=Clock().now, sleep=Clock().sleep)
+    with pytest.raises(SourceError):
+        frame(src)
+    assert closed == [1]
+
+
+def test_the_module_docstring_carries_the_operator_note():
+    doc = cg.__doc__
+    assert "$4 monthly usage limit" in doc and "Apify console" in doc and "input" in doc and "enabled = true" in doc
