@@ -19,8 +19,13 @@ Spend guard (it fails closed; every item applies before and around each run):
   A crash or an unclear start (transport error, HTTP 5xx, no run id) leaves the reservation in place, so the ledger can
   be over-booked but not short; only a definite rejection (HTTP 4xx except 408 on the start request) releases it. An unknown cost,
   or a run still ABORTING/RUNNING after the abort, keeps the reservation (raised to any higher reported cost).
+- Paid rows are never held only in memory: once parsed they are written atomically to
+  data/collect/congress_trades.pending.parquet and the day becomes `fetched`; `run` hands them to the writer and only
+  then marks the day `settled_ok` and deletes the file. A pending file (left by a failed writer or a crash) is
+  delivered first on the next run, even on a later day, with no HTTP call; one that cannot be read raises SourceError
+  and is left for a human.
 - At most one run is started per UTC day, including after a failure or an unclear start: no same-day retry. The ledger
-  records each day's outcome (`started`, `settled_ok` once the run SUCCEEDED and its items were read, else
+  records each day's outcome (`started`, `settled_ok` once the run SUCCEEDED and the writer stored its rows, else
   `settled_failed`). A same-day fetch after `settled_ok` returns no rows without error; after `started` or
   `settled_failed` it raises SourceError (no HTTP call), so the failure stays visible to the scheduler and QA.
 - `SpendLedger` (data/collect/apify_spend.json, fsynced then replaced atomically) totals the cost per UTC calendar month.
@@ -150,6 +155,10 @@ def ledger_path() -> Path:
     return config.DATA_DIR / "collect" / "apify_spend.json"
 
 
+def pending_path() -> Path:
+    return config.DATA_DIR / "collect" / "congress_trades.pending.parquet"
+
+
 class LedgerError(Exception):
     """The ledger file exists but cannot be trusted."""
 
@@ -175,12 +184,12 @@ def _valid_cost(value: object) -> bool:
     return number is not None and number >= 0
 
 
-DAY_STATES = ("started", "settled_ok", "settled_failed")
+DAY_STATES = ("started", "fetched", "settled_ok", "settled_failed")
 
 
 class SpendLedger:
-    """Apify spend per UTC calendar month and the outcome of each UTC day's run (`started` until it settles, then
-    `settled_ok` or `settled_failed`), persisted as JSON via an atomic replace. A file written by an earlier version
+    """Apify spend per UTC calendar month and the outcome of each UTC day's run (`started` until it settles, `fetched`
+    once the paid rows are in the pending file, then `settled_ok` or `settled_failed`), persisted as JSON via an atomic replace. A file written by an earlier version
     (a `started` list of days, no `days` table) loads with those days as `started`."""
 
     def __init__(self, path: Path, monthly_cap_usd: float = HARD_MONTHLY_CAP_USD) -> None:
@@ -200,7 +209,7 @@ class SpendLedger:
             days = data.get("days", {})
             legacy = data.get("started", [])
             ok = (
-                isinstance(months, dict) and isinstance(days, dict) and isinstance(legacy, list)
+                ("days" in data or "started" in data) and isinstance(months, dict) and isinstance(days, dict) and isinstance(legacy, list)
                 and all(isinstance(k, str) and _valid_cost(v) for k, v in months.items())
                 and all(isinstance(d, str) for d in (*days, *legacy))
             )
@@ -292,7 +301,7 @@ class SpendLedger:
                state: str = "settled_failed") -> None:
         """Replace a reservation by the actual cost (books `actual - reserved`) and record the day's outcome. An unknown
         actual (None) leaves the cost as booked; the month's total never goes below zero."""
-        if state not in DAY_STATES[1:]:
+        if state not in DAY_STATES[1:]:  # a day is only ever `started` by reserve
             raise ValueError(f"unknown settled state {state!r}")
         if actual_usd is not None and ((value := _number(actual_usd)) is None or value < 0):
             raise ValueError(f"cost must be a non-negative number, got {actual_usd!r}")
@@ -301,6 +310,16 @@ class SpendLedger:
             self._bump(data, now, float(actual_usd) - reserved_usd)
         self._set_day(data, now, state)
         self._save(data)
+
+    def settle_fetched(self) -> bool:
+        """Turn every `fetched` day into `settled_ok` once its rows were delivered. True when anything changed."""
+        data = self._load()
+        fetched = [d for d, v in data["days"].items() if v == "fetched"]
+        for d in fetched:
+            data["days"][d] = "settled_ok"
+        if fetched:
+            self._save(data)
+        return bool(fetched)
 
     def mark(self, now: datetime, state: str) -> None:
         """Record the day's outcome without touching the cost."""
@@ -526,6 +545,42 @@ def earlier_runs_exist() -> bool:
     return datasets.dataset("congress_trades").path.exists()
 
 
+def _write_pending(frame: pd.DataFrame) -> None:
+    """Atomically store the paid rows (pid-suffixed temp file, fsync, replace). The file holds no secret."""
+    path = pending_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        frame.to_parquet(tmp, index=False)
+        with open(tmp, "rb+") as f:
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _read_pending() -> pd.DataFrame | None:
+    """The rows waiting for the writer, or None. A pending file that cannot be read back as rows is a SourceError and is
+    left in place for a human; no new run is started past it."""
+    path = pending_path()
+    if not path.exists():
+        return None
+    failure = None
+    try:
+        frame = pd.read_parquet(path)
+        ok = (
+            {"source_id", "ts"} <= set(frame.columns) and frame["source_id"].notna().all()
+            and isinstance(frame["ts"].dtype, pd.DatetimeTZDtype) and not frame["ts"].isna().any()
+        )
+    except Exception as e:  # noqa: BLE001 - any unreadable file fails closed
+        ok, failure = False, type(e).__name__
+    if not ok:
+        raise _fail(f"the pending rows file {path.name} is unreadable{f' ({failure})' if failure else ''}; leaving it in "
+                    "place and starting no new run until a human has looked at it")
+    return frame
+
+
 class CongressTrades(Source):
     name = "congress_trades"
     rate_group = "apify"
@@ -692,16 +747,57 @@ class CongressTrades(Source):
         items = api.send("GET", f"/datasets/{dataset_id}/items", "dataset items",
                          params={"format": "json", "clean": "true", "limit": plan.max_items})
         frame = parse_items(items, plan)
+        if frame.empty:
+            self._mark(ledger, now, "settled_ok")
+            return frame
         try:
-            ledger.mark(now, "settled_ok")
-        except (LedgerError, OSError, ValueError) as e:
-            log.warning("congress_trades: could not mark the day settled_ok (%s); a retry today will report an error",
-                        type(e).__name__)
+            _write_pending(frame)
+        except Exception as e:  # noqa: BLE001 - the rows are still returned to the writer
+            log.warning("congress_trades: could not write the pending rows file (%s)", type(e).__name__)
+        self._mark(ledger, now, "fetched")
         return frame
 
-    def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
-        plan = _Plan(ctx.settings)
+    @staticmethod
+    def _mark(ledger: SpendLedger, now: datetime, state: str) -> None:
+        try:
+            ledger.mark(now, state)
+        except (LedgerError, OSError, ValueError) as e:
+            log.warning("congress_trades: could not mark the day %s (%s); a retry today will report an error", state,
+                        type(e).__name__)
+
+    def _confirm(self) -> None:
+        """After the writer returned: settle the `fetched` days, then drop the pending file (in that order, so a crash
+        in between only means a harmless second delivery)."""
+        failure = None
+        try:
+            SpendLedger(ledger_path()).settle_fetched()
+        except (LedgerError, OSError) as e:
+            failure = f"rows were delivered but the ledger could not be updated ({type(e).__name__}); keeping them pending"
+        if failure is not None:
+            raise _fail(failure)
+        pending_path().unlink(missing_ok=True)
+
+    def run(self, ctx: RunContext) -> int:
+        """Deliver rows left pending by an earlier run first (no HTTP), then today's run; a day is settled_ok, and the
+        pending file deleted, only after the writer returned. The store dedupes on source_id, so a second delivery of the
+        same rows is harmless."""
         ds = self.datasets[0]
+        total = 0
+        pending = _read_pending()
+        if pending is not None:
+            total += ctx.writer(ds, pending)
+            self._confirm()
+        total += ctx.writer(ds, self.fetch(ctx)[ds])
+        self._confirm()
+        return total
+
+    def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
+        ds = self.datasets[0]
+        pending = _read_pending()
+        if pending is not None:
+            log.info("congress_trades: %d rows are waiting for the writer, no HTTP call made", len(pending))
+            return {ds: pending}
+        plan = _Plan(ctx.settings)
         now = _utc(ctx.now)
         ledger = SpendLedger(ledger_path(), plan.monthly_cap)
         failure = None

@@ -188,7 +188,16 @@ def ledger() -> SpendLedger:
 
 
 def frame(src: CongressTrades, c: RunContext | None = None) -> pd.DataFrame:
-    return src.fetch(c or ctx())[datasets.dataset("congress_trades")]
+    """The rows one scheduled run hands to the writer (run delivers them and settles the day)."""
+    c = c or ctx()
+    delivered: list[pd.DataFrame] = []
+
+    def writer(ds, df):
+        delivered.append(df)
+        return len(df)
+
+    src.run(RunContext(now=c.now, settings=c.settings, writer=writer))
+    return pd.concat(delivered, ignore_index=True) if len(delivered) > 1 else delivered[-1]
 
 
 @pytest.fixture(autouse=True)
@@ -1194,3 +1203,177 @@ def test_an_empty_or_unreadable_state_entry_is_no_evidence(tmp_data_dir):
     assert cg.earlier_runs_exist() is False
     path.write_text(json.dumps({"congress_trades": "oops"}))
     assert cg.earlier_runs_exist() is True
+
+
+# ---- paid rows stay pending until the writer confirms -------------------------------------------------------------
+
+
+class Boom(Exception):
+    pass
+
+
+def failing_writer(ds, df):
+    raise Boom("disk full")
+
+
+def run_with(src, writer, now=NOW, settings=SETTINGS):
+    return src.run(RunContext(now=now, settings=settings, writer=writer))
+
+
+def test_a_ledger_with_neither_days_nor_started_is_refused():
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {"2026-11": 0.1}}))
+    src, api = make()
+    with pytest.raises(SourceError, match="ledger"):
+        frame(src)
+    assert api.requests == []
+
+
+def test_a_failing_writer_leaves_the_rows_pending_and_the_day_fetched():
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    assert cg.pending_path().exists() and ledger().day_state(NOW) == "fetched"
+    assert len(pd.read_parquet(cg.pending_path())) == 2
+    assert ledger().month_total(NOW) == pytest.approx(0.0312)  # the cost is settled either way
+    assert len(api.starts()) == 1
+
+
+def test_the_retry_delivers_the_pending_rows_without_any_http_call_then_settles():
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    n = len(api.requests)
+    got = []
+    run_with(src, lambda ds, df: got.append(df) or len(df), now=NOW + timedelta(seconds=60))
+    assert len(api.requests) == n
+    assert len(got[0]) == 2 and got[0]["source_id"].is_unique
+    assert ledger().day_state(NOW) == "settled_ok" and not cg.pending_path().exists()
+    assert [p.name for p in cg.pending_path().parent.iterdir() if "pending" in p.name] == []
+    # and a further same-day run is the quiet no-op of a settled day
+    assert frame(src, ctx(now=NOW + timedelta(hours=3))).empty and len(api.requests) == n
+
+
+def test_a_fetch_call_returns_the_pending_rows_without_http_even_before_the_gate():
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    n = len(api.requests)
+    out = src.fetch(ctx(now=NOW + timedelta(minutes=1)))[datasets.dataset("congress_trades")]
+    assert len(out) == 2 and len(api.requests) == n
+
+
+def test_a_crash_between_the_pending_write_and_the_writer_is_recovered_on_the_next_utc_day():
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)  # the process dies after the pending write, before the rows are stored
+    assert cg.pending_path().exists()
+    api2 = FakeApify(items=[trade(5)])
+    src2, _ = make(api2)  # a restarted daemon, the next UTC day
+    order = []
+    next_day = NOW + timedelta(days=1)
+    run_with(src2, lambda ds, df: order.append((list(df["politician"]), len(api2.requests))) or len(df), now=next_day)
+    assert order == [(["Sen Number0", "Sen Number1"], 0), (["Sen Number5"], order[1][1])]
+    assert order[1][1] > 0 and len(api2.starts()) == 1  # the new run started only after the delivery
+    assert not cg.pending_path().exists()
+    assert ledger().day_state(NOW) == "settled_ok" and ledger().day_state(next_day) == "settled_ok"
+
+
+def test_a_corrupt_pending_file_raises_with_no_http_and_is_left_in_place():
+    src, api = make()
+    cg.pending_path().parent.mkdir(parents=True)
+    cg.pending_path().write_bytes(b"not parquet")
+    with pytest.raises(SourceError, match="pending"):
+        run_with(src, lambda ds, df: len(df))
+    with pytest.raises(SourceError, match="pending"):
+        src.fetch(ctx())
+    assert api.requests == [] and cg.pending_path().read_bytes() == b"not parquet"
+
+
+@pytest.mark.parametrize("columns", [{"x": [1]}, {"source_id": [None], "ts": [pd.Timestamp("2026-11-02", tz="UTC")]},
+                                     {"source_id": ["a"], "ts": ["2026-11-02"]}])
+def test_a_pending_file_that_is_not_rows_is_corrupt(columns):
+    src, api = make()
+    cg.pending_path().parent.mkdir(parents=True)
+    pd.DataFrame(columns).to_parquet(cg.pending_path())
+    with pytest.raises(SourceError, match="pending"):
+        run_with(src, lambda ds, df: len(df))
+    assert api.requests == [] and cg.pending_path().exists()
+
+
+def test_double_delivery_through_the_store_does_not_duplicate_rows():
+    ds = datasets.dataset("congress_trades")
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    pending = pd.read_parquet(cg.pending_path())
+    assert store.write(ds, pending, now=NOW) == 2
+    assert store.write(ds, pending, now=NOW + timedelta(minutes=1)) == 0
+    run_with(src, lambda d, df: store.write(d, df, now=NOW + timedelta(minutes=2)), now=NOW + timedelta(minutes=2))
+    stored = pd.read_parquet(ds.path)
+    assert len(stored) == 2 and stored["source_id"].is_unique
+
+
+def test_the_pending_rows_round_trip_with_their_dtypes():
+    src, _ = make()
+    first = []
+    with pytest.raises(Boom):
+        run_with(src, lambda ds, df: first.append(df) or failing_writer(ds, df))
+    back = pd.read_parquet(cg.pending_path())
+    pd.testing.assert_frame_equal(back, first[0])
+
+
+def test_the_pending_file_is_written_atomically_with_a_pid_suffixed_temp_and_fsync(monkeypatch):
+    seen = {"fsync": 0, "tmp": []}
+    real_replace, real_fsync = os.replace, os.fsync
+    monkeypatch.setattr(cg.os, "fsync", lambda fd: (seen.__setitem__("fsync", seen["fsync"] + 1), real_fsync(fd))[1])
+    monkeypatch.setattr(cg.os, "replace", lambda a, b: (seen["tmp"].append(str(a)), real_replace(a, b))[1])
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    assert any(t.endswith(f".pending.parquet.{os.getpid()}.tmp") for t in seen["tmp"]) and seen["fsync"] >= 2
+    assert not list(cg.pending_path().parent.glob("*.tmp"))
+
+
+def test_a_pending_write_failure_still_hands_the_rows_to_the_writer(monkeypatch):
+    monkeypatch.setattr(cg, "_write_pending", lambda frame: (_ for _ in ()).throw(OSError("full")))
+    src, _ = make()
+    got = []
+    run_with(src, lambda ds, df: got.append(len(df)) or len(df))
+    assert got == [2] and ledger().day_state(NOW) == "settled_ok"
+
+
+def test_a_failing_writer_after_a_failed_pending_write_leaves_the_day_unresolved(monkeypatch):
+    monkeypatch.setattr(cg, "_write_pending", lambda frame: (_ for _ in ()).throw(OSError("full")))
+    src, api = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(minutes=1)))
+    assert len(api.starts()) == 1
+
+
+def test_an_empty_dataset_settles_the_day_without_a_pending_file():
+    src, _ = make(FakeApify(items=[]))
+    assert frame(src).empty
+    assert ledger().day_state(NOW) == "settled_ok" and not cg.pending_path().exists()
+
+
+def test_a_ledger_that_cannot_be_updated_after_delivery_keeps_the_rows_pending(monkeypatch):
+    src, _ = make()
+    monkeypatch.setattr(SpendLedger, "settle_fetched", lambda self: (_ for _ in ()).throw(OSError("ro")))
+    with pytest.raises(SourceError, match="pending"):
+        run_with(src, lambda ds, df: len(df))
+    assert cg.pending_path().exists() and ledger().day_state(NOW) == "fetched"
+    monkeypatch.undo()
+    got = []
+    run_with(src, lambda ds, df: got.append(len(df)) or len(df), now=NOW + timedelta(minutes=2))
+    assert got and ledger().day_state(NOW) == "settled_ok" and not cg.pending_path().exists()
+
+
+def test_the_pending_file_holds_no_secret():
+    src, _ = make()
+    with pytest.raises(Boom):
+        run_with(src, failing_writer)
+    assert KEY.encode() not in cg.pending_path().read_bytes()
