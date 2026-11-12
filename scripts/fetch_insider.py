@@ -18,7 +18,7 @@ import httpx
 import pandas as pd
 
 from tp import config, insiders
-from tp.collect import daemon
+from tp.collect import daemon, datasets, store
 from tp.collect.sources import sec
 from tp.edgar import EdgarBadResponse, EdgarBlocked, EdgarClient, user_agent
 
@@ -68,6 +68,7 @@ def main() -> int:
         return 1
     trades = pd.concat([pd.read_parquet(p) for p in sorted(parsed.glob("*.parquet"))], ignore_index=True)
     trades = trades.drop_duplicates(["trade_id", "owner_cik"])
+    trades = store.merge_rebuilt(datasets.dataset("form4"), trades)  # keep the recorder's rows and ingested_at
     sec.atomic_parquet(trades, insiders.trades_path())
     n = write_symbol_map()
     print(f"{len(trades):,} trades ({(trades['code'] == 'P').sum():,} purchases) from {trades['filing_date'].min():%Y-%m-%d} "

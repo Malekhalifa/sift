@@ -120,6 +120,16 @@ def write(ds: Dataset, frame: pd.DataFrame, now: datetime | None = None) -> int:
     return added
 
 
+def merge_rebuilt(ds: Dataset, rebuilt: pd.DataFrame) -> pd.DataFrame:
+    """The stored file with `rebuilt` rows whose key is new added after it, for the manual rebuild scripts: stored rows win,
+    so the recorder's rows and their `ingested_at` survive. An unreadable stored file raises StoreError."""
+    old = _load(ds)
+    if old is None:
+        return rebuilt
+    merged = pd.concat([old, _align(ds, old, rebuilt)], ignore_index=True).drop_duplicates(list(ds.key), keep="first")
+    return merged.sort_values(ds.ts_col, kind="stable", key=_ts).reset_index(drop=True)
+
+
 def read(
     ds: Dataset,
     since: pd.Timestamp | None = None,

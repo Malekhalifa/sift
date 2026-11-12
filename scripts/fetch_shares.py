@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 from tp import config
-from tp.collect import daemon
+from tp.collect import daemon, datasets, store
 from tp.collect.sources import sec
 from tp.edgar import EdgarBadResponse, EdgarBlocked, EdgarClient
 
@@ -48,7 +48,9 @@ def main() -> int:
         print(f"Bad SEC response: {e}. Finished symbols are kept; rerun later.", file=sys.stderr)
         return 1
     allrows = pd.concat([pd.read_parquet(p) for p in sorted(by_symbol.glob("*.parquet"))], ignore_index=True)
-    sec.atomic_parquet(allrows, folder / "shares.parquet")
+    ds = datasets.dataset("xbrl_shares")  # keep the rows the recorder added since the caches were built
+    allrows = store.merge_rebuilt(ds, allrows)
+    sec.atomic_parquet(allrows, ds.path)
     print(f"{len(allrows):,} share counts for {allrows['symbol'].nunique()} symbols; filed {allrows['filed'].min():%Y-%m-%d} to {allrows['filed'].max():%Y-%m-%d}")
     return 0
 
