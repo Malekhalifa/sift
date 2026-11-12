@@ -29,6 +29,7 @@ SETTINGS = {"sources": {
     "trump_posts": {"schedule": "daily 07:00 America/New_York", "lag_minutes": 0},
     "sp500_changes": {"schedule": "weekly sun 10:00 America/New_York", "lag_minutes": 0},
     "wikipedia_pageviews": {"schedule": "daily 06:30 UTC", "lag_minutes": 0},
+    "congress_trades": {"schedule": "daily 08:30 America/New_York", "lag_minutes": 0, "enabled": False},
 }}
 PREFIX = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/"
 

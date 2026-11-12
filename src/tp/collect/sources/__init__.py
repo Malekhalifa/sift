@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from tp.collect.source import Source
 from tp.collect.sources.alpaca_bars import AlpacaBars
+from tp.collect.sources.congress import CongressTrades
 from tp.collect.sources.finra import FinraShortInterest, FinraShortVolume
 from tp.collect.sources.political import DodAwards, TrumpPosts
 from tp.collect.sources.sec import SecFilings, SecForm4, SecXbrlShares
@@ -29,6 +30,7 @@ REGISTRY: tuple[tuple[str, type[Source]], ...] = (
     ("trump_posts", TrumpPosts),
     ("sp500_changes", Sp500Changes),
     ("wikipedia_pageviews", WikipediaPageviews),
+    ("congress_trades", CongressTrades),
 )
 
 

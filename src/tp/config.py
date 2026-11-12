@@ -31,6 +31,16 @@ class Settings:
         return cls(alpaca_key_id=key_id, alpaca_secret=secret)
 
 
+def apify_key() -> str:
+    """The Apify API key from APIFY_API_KEY (or `.env`), read only when asked so the other code paths never need it.
+    ValueError, without the key, when it is not set."""
+    load_dotenv(ROOT / ".env")
+    key = os.environ.get("APIFY_API_KEY", "").strip()
+    if not key:
+        raise ValueError("APIFY_API_KEY is not set; add it to .env (see .env.example)")
+    return key
+
+
 def load_universe() -> dict:
     with open(ROOT / "config" / "universe.toml", "rb") as f:
         return tomllib.load(f)
