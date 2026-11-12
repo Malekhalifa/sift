@@ -236,7 +236,7 @@ def test_ledger_persists_across_restarts_and_rolls_over_at_the_utc_month_boundar
     late = datetime(2026, 11, 30, 20, 0, tzinfo=ZoneInfo("America/New_York"))
     assert SpendLedger(path).month_total(late) == 0.0
     assert [p.name for p in path.parent.iterdir()] == ["l.json"]  # no temp file left behind
-    assert set(json.loads(path.read_text())) <= {"months", "started"}
+    assert set(json.loads(path.read_text())) <= {"months", "days"}
 
 
 def test_ledger_rejects_naive_datetimes_and_negative_costs(tmp_path):
@@ -344,8 +344,10 @@ def test_only_one_run_is_started_per_day_even_after_a_failure():
         frame(src)
     assert len(api.starts()) == 1
     n = len(api.requests)
-    assert frame(src, ctx(now=NOW + timedelta(hours=2))).empty
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(hours=2)))
     assert len(api.requests) == n and len(api.starts()) == 1
+    assert ledger().day_state(NOW) == "settled_failed"
     ok_api = FakeApify()
     src2, _ = make(ok_api)
     assert len(frame(src2, ctx(now=NOW + timedelta(days=1)))) == 2
@@ -457,11 +459,12 @@ def test_every_request_carries_the_key_only_in_the_authorization_header():
 BODY_WITH_KEY = f'{{"error": "bad token {KEY} sent as Bearer {KEY}"}}' + " pad" * 200
 
 
-@pytest.mark.parametrize("where", ["limits", "start", "details", "poll", "items"])
+@pytest.mark.parametrize("where", ["limits", "start", "details", "poll", "items", "abort"])
 @pytest.mark.parametrize("failure", ["status", "transport", "bad-json"])
 def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog):
-    api = FakeApify()
+    api = FakeApify(poll_failures=100 if where == "abort" else 0)  # failing polls lead to the abort request
     base = api.handler
+    hits: list[str] = []
 
     def hostile(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -471,9 +474,11 @@ def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog)
             "details": request.method == "GET" and path.startswith("/v2/acts/"),
             "poll": request.method == "GET" and path.startswith("/v2/actor-runs/"),
             "items": request.method == "GET" and path.startswith("/v2/datasets/"),
+            "abort": request.method == "POST" and path.endswith("/abort"),
         }[where]
         if not target:
             return base(request)
+        hits.append(where)
         if failure == "transport":
             raise httpx.ConnectError(f"cannot reach {request.url} with Authorization: Bearer {KEY} / {KEY}")
         if failure == "bad-json":
@@ -490,7 +495,9 @@ def test_api_key_never_appears_in_logs_or_exception_text(where, failure, caplog)
                  *(str(r.__dict__) for r in caplog.records)):
         assert KEY not in text
     assert err.__cause__ is None and err.__context__ is None
-    if failure == "status":
+    if where == "abort":
+        assert hits == ["abort"]  # the failing abort request really was made
+    elif failure == "status":
         assert "401" in str(err) and len(str(err)) < 400
 
 
@@ -738,7 +745,8 @@ def is_start(request: httpx.Request) -> bool:
 def test_reserve_is_one_atomic_write_of_the_cap_and_the_day_marker(tmp_path):
     led = SpendLedger(tmp_path / "l.json")
     led.reserve(NOW, 0.05)
-    assert json.loads((tmp_path / "l.json").read_text()) == {"months": {"2026-11": 0.05}, "started": ["2026-11-12"]}
+    assert json.loads((tmp_path / "l.json").read_text()) == {"months": {"2026-11": 0.05},
+                                                             "days": {"2026-11-12": "started"}}
     assert led.started_on(NOW) and led.month_total(NOW) == pytest.approx(0.05) and not led.is_empty()
 
 
@@ -802,19 +810,23 @@ def test_a_transport_error_on_the_start_keeps_the_reservation_and_blocks_a_same_
         frame(src)
     assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
     assert len(api.starts()) == 1
+    assert ledger().day_state(NOW) == "started"
     for later in (timedelta(seconds=60), timedelta(seconds=180), timedelta(hours=5)):
-        assert frame(src, ctx(now=NOW + later)).empty
+        with pytest.raises(SourceError, match="did not complete; not retrying until the next UTC day"):
+            frame(src, ctx(now=NOW + later))
     assert len(api.starts()) == 1 and ledger().month_total(NOW) == pytest.approx(0.05)
 
 
-@pytest.mark.parametrize("status", [500, 502, 503])
-def test_a_5xx_on_the_start_keeps_the_reservation(status):
+@pytest.mark.parametrize("status", [408, 500, 502, 503])
+def test_an_ambiguous_status_on_the_start_keeps_the_reservation(status):
     api = FakeApify(start_status=status)
     src, _ = make(api)
     with pytest.raises(SourceError, match=str(status)):
         frame(src)
     assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
-    assert frame(src, ctx(now=NOW + timedelta(minutes=2))).empty and len(api.starts()) == 1
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(minutes=2)))
+    assert len(api.starts()) == 1
 
 
 def test_a_start_reply_without_a_run_id_keeps_the_reservation():
@@ -828,8 +840,7 @@ def test_a_start_reply_without_a_run_id_keeps_the_reservation():
     assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
 
 
-@pytest.mark.parametrize("method", ["reserve", "add"])
-def test_when_the_reservation_cannot_be_written_no_run_is_started(monkeypatch, method):
+def test_when_the_reservation_cannot_be_written_no_run_is_started(monkeypatch):
     def broken(self, *a, **k):
         raise OSError("disk full")
 
@@ -860,7 +871,9 @@ def test_a_crash_after_the_start_leaves_the_reservation_in_the_ledger():
         frame(src)
     assert KEY not in str(e.value)
     assert ledger().month_total(NOW) == pytest.approx(0.05) and ledger().started_on(NOW)
-    assert frame(src, ctx(now=NOW + timedelta(minutes=5))).empty and len(api.starts()) == 1
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW + timedelta(minutes=5)))
+    assert len(api.starts()) == 1 and ledger().day_state(NOW) == "started"
 
 
 def test_a_run_still_not_terminal_after_the_abort_keeps_the_full_reservation():
@@ -1057,3 +1070,127 @@ def test_the_http_client_is_closed_after_a_refusal():
 def test_the_module_docstring_carries_the_operator_note():
     doc = cg.__doc__
     assert "$4 monthly usage limit" in doc and "Apify console" in doc and "input" in doc and "enabled = true" in doc
+
+
+# ---- the outcome of each day -------------------------------------------------------------------------------------
+
+
+def test_a_successful_run_marks_the_day_settled_ok_and_a_same_day_retry_is_an_error_free_no_op():
+    api = FakeApify()
+    src, _ = make(api)
+    assert len(frame(src)) == 2
+    assert ledger().day_state(NOW) == "settled_ok"
+    n = len(api.requests)
+    again = frame(src, ctx(now=NOW + timedelta(hours=4)))
+    assert again.empty and len(api.requests) == n
+
+
+@pytest.mark.parametrize("status", ["FAILED", "ABORTED", "TIMED-OUT"])
+def test_a_run_that_ends_badly_marks_the_day_failed_and_a_retry_raises(status):
+    api = FakeApify(run=run_object(status, cost=0.02))
+    src, _ = make(api)
+    with pytest.raises(SourceError, match=status):
+        frame(src)
+    assert ledger().day_state(NOW) == "settled_failed"
+    with pytest.raises(SourceError, match="already started today and did not complete"):
+        frame(src, ctx(now=NOW + timedelta(seconds=60)))
+    assert len(api.starts()) == 1
+
+
+def test_a_timed_out_wait_and_unreadable_items_mark_the_day_failed():
+    api = FakeApify(polls=["RUNNING"] * 1000)
+    src, _ = make(api, clock=Clock(step=30.0))
+    with pytest.raises(SourceError):
+        frame(src)
+    assert ledger().day_state(NOW) == "settled_failed"
+    src2, _ = make(FakeApify(items={"not": "a list"}))
+    with pytest.raises(SourceError):
+        frame(src2, ctx(now=NOW + timedelta(days=1)))
+    assert ledger().day_state(NOW + timedelta(days=1)) == "settled_failed"
+
+
+def test_the_next_utc_day_starts_fresh_after_a_failed_day():
+    api = FakeApify(start_status=503)
+    src, _ = make(api)
+    with pytest.raises(SourceError):
+        frame(src)
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src, ctx(now=NOW.replace(hour=23, minute=59)))
+    api.start_status = 201
+    tomorrow = ctx(now=datetime(2026, 11, 13, 0, 1, tzinfo=UTC))
+    assert len(frame(src, tomorrow)) == 2
+    days = json.loads(cg.ledger_path().read_text())["days"]
+    assert days == {"2026-11-12": "started", "2026-11-13": "settled_ok"}
+
+
+def test_old_day_records_are_pruned():
+    led = ledger()
+    led.reserve(NOW - timedelta(days=100), 0.05)
+    led.reserve(NOW, 0.05)
+    assert list(json.loads(cg.ledger_path().read_text())["days"]) == ["2026-11-12"]
+
+
+def test_a_round_one_ledger_without_day_records_loads_and_only_todays_marker_counts():
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {"2026-11": 0.1}, "started": ["2026-11-11", "2026-11-12"]}))
+    led = ledger()
+    assert led.month_total(NOW) == pytest.approx(0.1) and led.day_state(NOW) == "started"
+    assert led.day_state(NOW + timedelta(days=1)) is None
+    src, api = make()
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src)
+    assert api.requests == []
+    assert len(frame(src, ctx(now=NOW + timedelta(days=1)))) == 2  # tomorrow runs; the legacy list is rewritten
+    assert set(json.loads(path.read_text())) == {"months", "days"}
+
+
+def test_a_round_one_ledger_whose_marker_is_another_day_runs_today():
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {"2026-11": 0.1}, "started": ["2026-11-11"]}))
+    src, api = make()
+    assert len(frame(src)) == 2 and len(api.starts()) == 1
+
+
+@pytest.mark.parametrize("state", ["weird", 7, None, ["x"], {"a": 1}])
+def test_an_unknown_day_state_fails_closed(state):
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {}, "days": {"2026-11-12": state}}))
+    src, api = make()
+    assert ledger().day_state(NOW) == "started"
+    with pytest.raises(SourceError, match="did not complete"):
+        frame(src)
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("days", ["x", [1], 3])
+def test_a_malformed_days_table_refuses_the_run(days):
+    path = cg.ledger_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"months": {}, "days": days}))
+    src, api = make()
+    with pytest.raises(SourceError, match="ledger"):
+        frame(src)
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("entry", ["oops", 5, ["x"], None, {"last_success": "garbage"},
+                                   {"last_success": "2026-11-01T00:00:00+00:00"}])
+def test_a_malformed_state_entry_counts_as_evidence_of_earlier_runs(tmp_data_dir, entry):
+    path = tmp_data_dir / "collect" / "state.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"congress_trades": entry}))
+    assert cg.earlier_runs_exist() is True
+
+
+def test_an_empty_or_unreadable_state_entry_is_no_evidence(tmp_data_dir):
+    path = tmp_data_dir / "collect" / "state.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"congress_trades": {"failures": 2}}))
+    assert cg.earlier_runs_exist() is False
+    path.write_text("{broken")
+    assert cg.earlier_runs_exist() is False
+    path.write_text(json.dumps({"congress_trades": "oops"}))
+    assert cg.earlier_runs_exist() is True

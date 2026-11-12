@@ -17,9 +17,12 @@ Spend guard (it fails closed; every item applies before and around each run):
   month's total and records the UTC day as started; if that write fails no run is started. When the run reaches a
   terminal state the reservation is replaced by the ACTUAL cost (`usageTotalUsd`, settled as `actual - reserved`).
   A crash or an unclear start (transport error, HTTP 5xx, no run id) leaves the reservation in place, so the ledger can
-  be over-booked but not short; only a definite rejection (HTTP 4xx on the start request) releases it. An unknown cost,
+  be over-booked but not short; only a definite rejection (HTTP 4xx except 408 on the start request) releases it. An unknown cost,
   or a run still ABORTING/RUNNING after the abort, keeps the reservation (raised to any higher reported cost).
-- At most one run is started per UTC day, including after a failure or an unclear start: no same-day retry.
+- At most one run is started per UTC day, including after a failure or an unclear start: no same-day retry. The ledger
+  records each day's outcome (`started`, `settled_ok` once the run SUCCEEDED and its items were read, else
+  `settled_failed`). A same-day fetch after `settled_ok` returns no rows without error; after `started` or
+  `settled_failed` it raises SourceError (no HTTP call), so the failure stays visible to the scheduler and QA.
 - `SpendLedger` (data/collect/apify_spend.json, fsynced then replaced atomically) totals the cost per UTC calendar month.
   No run is started, and no HTTP call is made at all, when the month's total plus the daily cap would pass
   `monthly_cap_usd` (clamped to 4.0, 80% of the $5 credit). A ledger that cannot be read refuses the run, and so does a
@@ -66,7 +69,6 @@ from tp.collect.source import (
     SourceError,
     parse_schedule,
 )
-from tp.collect.state import State
 
 log = logging.getLogger(__name__)
 
@@ -173,8 +175,13 @@ def _valid_cost(value: object) -> bool:
     return number is not None and number >= 0
 
 
+DAY_STATES = ("started", "settled_ok", "settled_failed")
+
+
 class SpendLedger:
-    """Apify spend per UTC calendar month and the UTC days a run was started, persisted as JSON via an atomic replace."""
+    """Apify spend per UTC calendar month and the outcome of each UTC day's run (`started` until it settles, then
+    `settled_ok` or `settled_failed`), persisted as JSON via an atomic replace. A file written by an earlier version
+    (a `started` list of days, no `days` table) loads with those days as `started`."""
 
     def __init__(self, path: Path, monthly_cap_usd: float = HARD_MONTHLY_CAP_USD) -> None:
         self.path = Path(path)
@@ -184,29 +191,31 @@ class SpendLedger:
         try:
             raw = self.path.read_text()
         except FileNotFoundError:
-            return {"months": {}, "started": []}
+            return {"months": {}, "days": {}}
         except OSError as e:
             raise LedgerError(f"cannot read {self.path.name}: {type(e).__name__}") from None
         try:
             data = json.loads(raw)
-            months, started = data["months"], data["started"]
+            months = data["months"]
+            days = data.get("days", {})
+            legacy = data.get("started", [])
             ok = (
-                isinstance(months, dict) and isinstance(started, list)
+                isinstance(months, dict) and isinstance(days, dict) and isinstance(legacy, list)
                 and all(isinstance(k, str) and _valid_cost(v) for k, v in months.items())
-                and all(isinstance(d, str) for d in started)
+                and all(isinstance(d, str) for d in (*days, *legacy))
             )
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, AttributeError):
             ok = False
         if not ok:
             raise LedgerError(f"{self.path.name} is not a valid ledger")
-        return {"months": months, "started": started}
+        return {"months": months, "days": {**dict.fromkeys(legacy, "started"), **days}}
 
     def _save(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
         try:
             with open(tmp, "w") as f:
-                f.write(json.dumps(data, sort_keys=True))
+                f.write(json.dumps({"months": data["months"], "days": data["days"]}, sort_keys=True))
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, self.path)
@@ -220,7 +229,7 @@ class SpendLedger:
     def is_empty(self) -> bool:
         """True before any run has ever been started or booked."""
         data = self._load()
-        return not any(data["months"].values()) and not data["started"]
+        return not any(data["months"].values()) and not data["days"]
 
     def month_total(self, now: datetime) -> float:
         return float(self._load()["months"].get(_month(now), 0.0))
@@ -233,6 +242,12 @@ class SpendLedger:
         else:
             data["months"].pop(key, None)
 
+    def _set_day(self, data: dict, now: datetime, state: str) -> None:
+        today = _utc(now)
+        horizon = f"{today - timedelta(days=KEEP_DAYS):%Y-%m-%d}"
+        data["days"] = {d: v for d, v in data["days"].items() if d >= horizon}
+        data["days"][f"{today:%Y-%m-%d}"] = state
+
     def add(self, now: datetime, usd: float) -> None:
         if (value := _number(usd)) is None or value < 0:
             raise ValueError(f"cost must be a non-negative number, got {usd!r}")
@@ -244,38 +259,52 @@ class SpendLedger:
         """False once this month's total plus the planned cost would pass the monthly cap."""
         return self.month_total(now) + planned_usd <= self.monthly_cap_usd + EPSILON
 
+    def day_state(self, now: datetime) -> str | None:
+        """`started`, `settled_ok` or `settled_failed` for the UTC day of `now`, None when no run was started. A state
+        this code does not know reads as `started` (unresolved), so an unknown shape fails closed."""
+        days, today = self._load()["days"], f"{_utc(now):%Y-%m-%d}"
+        if today not in days:
+            return None
+        state = days[today]
+        return state if isinstance(state, str) and state in DAY_STATES else "started"
+
     def started_on(self, now: datetime) -> bool:
-        return f"{_utc(now):%Y-%m-%d}" in self._load()["started"]
+        return self.day_state(now) is not None
 
     def reserve(self, now: datetime, usd: float) -> None:
-        """One atomic write: add `usd` to the month's total and record the UTC day as started. Done BEFORE a run is
+        """One atomic write: add `usd` to the month's total and record the UTC day as `started`. Done BEFORE a run is
         requested, so whatever happens afterwards the ledger is over-booked rather than short."""
         if (value := _number(usd)) is None or value < 0:
             raise ValueError(f"reservation must be a non-negative number, got {usd!r}")
         data = self._load()
-        today = _utc(now)
-        horizon = f"{today - timedelta(days=KEEP_DAYS):%Y-%m-%d}"
-        data["started"] = sorted({*(d for d in data["started"] if d >= horizon), f"{today:%Y-%m-%d}"})
+        self._set_day(data, now, "started")
         self._bump(data, now, value)
         self._save(data)
 
     def release(self, now: datetime, usd: float) -> None:
-        """Undo `reserve` after a definite rejection: take `usd` back and forget the day marker."""
+        """Undo `reserve` after a definite rejection: take `usd` back and forget the day."""
         data = self._load()
-        data["started"] = [d for d in data["started"] if d != f"{_utc(now):%Y-%m-%d}"]
+        data["days"].pop(f"{_utc(now):%Y-%m-%d}", None)
         self._bump(data, now, -usd)
         self._save(data)
 
-    def settle(self, now: datetime, actual_usd: float | None, reserved_usd: float) -> None:
-        """Replace a reservation by the actual cost (books `actual - reserved`). An unknown actual (None) leaves the
-        reservation as booked; the month's total never goes below zero."""
-        if actual_usd is None:
-            return
-        if (value := _number(actual_usd)) is None or value < 0:
+    def settle(self, now: datetime, actual_usd: float | None, reserved_usd: float,
+               state: str = "settled_failed") -> None:
+        """Replace a reservation by the actual cost (books `actual - reserved`) and record the day's outcome. An unknown
+        actual (None) leaves the cost as booked; the month's total never goes below zero."""
+        if state not in DAY_STATES[1:]:
+            raise ValueError(f"unknown settled state {state!r}")
+        if actual_usd is not None and ((value := _number(actual_usd)) is None or value < 0):
             raise ValueError(f"cost must be a non-negative number, got {actual_usd!r}")
         data = self._load()
-        self._bump(data, now, value - reserved_usd)
+        if actual_usd is not None:
+            self._bump(data, now, float(actual_usd) - reserved_usd)
+        self._set_day(data, now, state)
         self._save(data)
+
+    def mark(self, now: datetime, state: str) -> None:
+        """Record the day's outcome without touching the cost."""
+        self.settle(now, None, 0.0, state)
 
 
 # ---- settings -----------------------------------------------------------------------------------------------------
@@ -483,14 +512,17 @@ def _dig(body: object, *path: str) -> object:
 
 
 def earlier_runs_exist() -> bool:
-    """True when this source has run before: a last_success in the daemon state file or a stored dataset file.
-    Read-only (an unreadable state file counts as no evidence; the dataset file is checked anyway)."""
+    """True when this source has run before: a `congress_trades` entry with a last_success in the daemon state file (a
+    malformed entry counts as evidence, failing closed) or a stored dataset file. Read-only; an unreadable state file
+    counts as no evidence, the dataset file is checked anyway."""
     try:
         data = json.loads(state.default_path().read_text())
-        if isinstance(data, dict) and State(data=data).last_success("congress_trades") is not None:
+    except (OSError, ValueError):
+        data = None
+    if isinstance(data, dict) and "congress_trades" in data:
+        entry = data["congress_trades"]
+        if not isinstance(entry, dict) or entry.get("last_success") is not None:
             return True
-    except (OSError, ValueError, TypeError):
-        pass
     return datasets.dataset("congress_trades").path.exists()
 
 
@@ -599,7 +631,7 @@ class CongressTrades(Source):
             log.warning("congress_trades: no final cost known for the run, keeping $%.4f booked", actual)
         failure = None
         try:
-            ledger.settle(now, actual, plan.daily_cap)
+            ledger.settle(now, actual, plan.daily_cap, "settled_failed")
         except (LedgerError, OSError, ValueError) as e:
             failure = (f"could not settle the run's cost ${actual:.4f} in the ledger ({type(e).__name__}); the "
                        f"reservation of ${plan.daily_cap:.2f} stays booked")
@@ -623,14 +655,14 @@ class CongressTrades(Source):
             log.warning("congress_trades: could not release the reservation (%s); it stays booked", type(e).__name__)
 
     def _start(self, api: _Api, ledger: SpendLedger, plan: _Plan, now: datetime) -> str:
-        """Reserve the daily cap, then ask for the run. Only a definite rejection (HTTP 4xx) releases the reservation:
+        """Reserve the daily cap, then ask for the run. Only a definite rejection (HTTP 4xx, not 408) releases the reservation:
         after a transport error or a 5xx the run may exist, so the reservation and the day marker stay."""
         self._reserve(ledger, now, plan)
         params = {"maxTotalChargeUsd": f"{plan.daily_cap:g}", "timeout": RUN_TIMEOUT_S, "maxItems": plan.max_items}
         try:
             started = api.run("POST", f"/acts/{plan.actor}/runs", "start run", params=params, body=plan.body)
         except SourceError as e:
-            if 400 <= (getattr(e, "status", None) or 0) < 500:
+            if 400 <= (getattr(e, "status", None) or 0) < 500 and e.status != 408:  # 408 is ambiguous: keep it
                 self._release(ledger, now, plan)
             raise
         run_id = started.get("id")
@@ -659,7 +691,13 @@ class CongressTrades(Source):
             raise _fail(f"run {run_id} has no usable default dataset")
         items = api.send("GET", f"/datasets/{dataset_id}/items", "dataset items",
                          params={"format": "json", "clean": "true", "limit": plan.max_items})
-        return parse_items(items, plan)
+        frame = parse_items(items, plan)
+        try:
+            ledger.mark(now, "settled_ok")
+        except (LedgerError, OSError, ValueError) as e:
+            log.warning("congress_trades: could not mark the day settled_ok (%s); a retry today will report an error",
+                        type(e).__name__)
+        return frame
 
     def fetch(self, ctx: RunContext) -> dict[Dataset, pd.DataFrame]:
         plan = _Plan(ctx.settings)
@@ -671,10 +709,12 @@ class CongressTrades(Source):
             if not ledger.exists() and earlier_runs_exist():
                 failure = ("apify ledger missing but earlier runs exist; restore data/collect/apify_spend.json or "
                            "confirm spend (recreate it with the month's real spend)")
-            elif ledger.started_on(now):
-                log.warning("congress_trades: a run was already started on %s UTC, not starting another",
-                            f"{now:%Y-%m-%d}")
+            elif (day := ledger.day_state(now)) == "settled_ok":
+                log.info("congress_trades: today's run already completed, nothing more to do until the next UTC day")
                 return {ds: _empty(plan)}
+            elif day is not None:
+                failure = ("an Apify run was already started today and did not complete; not retrying until the "
+                           "next UTC day")
             elif not ledger.allowed(now, plan.daily_cap):
                 failure = (f"this month's Apify spend ${ledger.month_total(now):.4f} plus the daily cap "
                            f"${plan.daily_cap:.2f} would pass the monthly cap ${plan.monthly_cap:.2f}; refusing to run")
