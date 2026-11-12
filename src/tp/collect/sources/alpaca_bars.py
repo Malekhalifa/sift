@@ -48,6 +48,7 @@ class AlpacaBars(Source):
         corp_actions.sync_splits(client, names, recorder.FEED_START["sip"], ctx.now.astimezone(recorder.ET).date())
         added, failures = recorder.sync_plan(client, plan, ctx.now, WORKERS)
         if failures:
+            failures = sorted(failures)
             shown = failures[:MAX_LISTED_FAILURES]
             more = len(failures) - len(shown)
             tail = f"\n  ... and {more} more" if more else ""

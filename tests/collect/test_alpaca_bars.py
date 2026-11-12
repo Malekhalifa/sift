@@ -9,7 +9,10 @@ from tp.collect.sources import build_sources
 from tp.collect.sources.alpaca_bars import AlpacaBars
 
 NOW = datetime(2025, 2, 11, 2, 0, tzinfo=UTC)  # 21:00 EST
-SETTINGS = {"sources": {"alpaca_bars": {"schedule": "daily 21:00 America/New_York", "lag_minutes": 20}}}
+SETTINGS = {"sources": {
+    "alpaca_bars": {"schedule": "daily 21:00 America/New_York", "lag_minutes": 20},
+    "sec_filings": {"schedule": "daily 07:30 America/New_York", "lag_minutes": 0},
+}}
 
 
 class FakeClient:
@@ -134,3 +137,14 @@ def test_release_lock_even_when_a_series_fails():
     lock = open(config.DATA_DIR / ".recorder.lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     lock.close()
+
+
+def test_failed_series_are_listed_in_sorted_order(monkeypatch):
+    names = [f"S{i:02d}" for i in range(6)]
+    monkeypatch.setattr(config, "core_symbols", lambda: list(reversed(names)))
+    for fn in ("wide_symbols", "events_symbols", "confirm_symbols", "sf_symbols"):
+        monkeypatch.setattr(config, fn, lambda: [])
+    with pytest.raises(SourceError) as e:
+        source(FakeClient(fail=set(names))).run(ctx())
+    lines = [ln.strip() for ln in str(e.value).splitlines()[1:]]
+    assert lines == sorted(lines) and len(lines) == 18

@@ -3,10 +3,21 @@ from __future__ import annotations
 
 from tp.collect.source import Source
 from tp.collect.sources.alpaca_bars import AlpacaBars
+from tp.collect.sources.sec import SecFilings
+
+
+def source_settings(settings: dict, name: str) -> dict:
+    """The `[sources.<name>]` table, or a clear exit when config/collect.toml lacks it."""
+    table = settings.get("sources", {}).get(name)
+    if table is None:
+        raise SystemExit(f"config/collect.toml is missing [sources.{name}]")
+    return table
 
 
 def build_sources(settings: dict) -> list[Source]:
     sources: list[Source] = []
-    cfg = settings["sources"]["alpaca_bars"]
+    cfg = source_settings(settings, "alpaca_bars")
     sources.append(AlpacaBars(cfg["schedule"], cfg["lag_minutes"]))
+    cfg = source_settings(settings, "sec_filings")
+    sources.append(SecFilings(cfg["schedule"], cfg["lag_minutes"]))
     return sources
