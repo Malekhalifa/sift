@@ -1,0 +1,53 @@
+# Settings for the tp.collect recorder daemon. Schedule text is parsed by tp.collect.schedule.parse_schedule
+# (timezone defaults to America/New_York when omitted).
+
+[metrics]
+port = 9120
+
+[apify]
+monthly_cap_usd = 4.0
+daily_run_cap_usd = 0.05
+
+[sources.alpaca_bars]
+schedule = "daily 21:00 America/New_York"
+lag_minutes = 20
+
+[sources.sec_filings]
+schedule = "daily 07:30 America/New_York"
+lag_minutes = 0
+
+[sources.sec_form4]
+schedule = "daily 08:00 America/New_York"
+lag_minutes = 0
+
+[sources.sec_xbrl_shares]
+schedule = "weekly sun 09:00 America/New_York"
+lag_minutes = 0
+
+[sources.finra_shortvol]
+schedule = "daily 18:30 America/New_York"
+lag_minutes = 0
+
+[sources.finra_short_interest]
+schedule = "daily 09:00 America/New_York"
+lag_minutes = 0
+
+[sources.dod_awards]
+schedule = "weekly mon 06:00 America/New_York"
+lag_minutes = 0
+
+[sources.trump_posts]
+schedule = "daily 07:00 America/New_York"
+lag_minutes = 0
+
+[sources.sp500_changes]
+schedule = "weekly sun 10:00 America/New_York"
+lag_minutes = 0
+
+[sources.wikipedia_pageviews]
+schedule = "daily 06:30 UTC"
+lag_minutes = 0
+
+[sources.congress_trades]
+schedule = "daily 08:30 America/New_York"
+lag_minutes = 0
