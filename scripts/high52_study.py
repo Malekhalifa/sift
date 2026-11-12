@@ -66,7 +66,7 @@ def main() -> None:
     p = stats(run(config.events_symbols(), base, spy_open), "PRIMARY: 150 stocks (ranks 1-150)")
     print("\nFirst run, bars as stored (the pre-registered run). Four stocks in the replication set carry a reverse split missing from the split list.")
     stats(run(config.confirm_symbols(), base, spy_open), "REPLICATION as stored: 250 unseen stocks (ranks 151-400)")
-    print("\nSame rule after a data-hygiene fix fixed in advance of this rerun: drop stocks with a one-session gain above +100%.")
+    print("\nSame rule after a data-hygiene fix decided after seeing the first replication (its result was absurd): drop stocks with a one-session gain above +100%.")
     r = stats(run(config.confirm_symbols(), base, spy_open, drop_missed_splits=True), "REPLICATION cleaned: unseen stocks without missed reverse splits")
     checks = {
         f"1. at least {MIN_MONTHS} months": p["n"] >= MIN_MONTHS,

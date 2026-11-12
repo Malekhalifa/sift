@@ -38,4 +38,4 @@ wrong split ratio for NVS 2019) are not adjusted either and remain in the data: 
 one way. **Follow-up:** audit the earlier confirmation runs (M8, M11) for events that straddle these bars; the four
 stocks are about 1.6% of that universe, so a flipped verdict is very unlikely.
 
-Trials logged: the study ran twice (original and the data-hygiene rerun), both counted. Holdout still untouched.
+Trials logged: the script ran three times (the original, the data-hygiene rerun, and a rerun after a wording-only edit with identical numbers), and all three are counted (301 in total). Holdout still untouched.
