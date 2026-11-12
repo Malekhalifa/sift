@@ -145,7 +145,7 @@ A pass would still be a hypothesis: nine years is a short sample, and every publ
 | M15 | 52-week-high momentum | -0.37% a month | Not eligible |
 | M16 | FINRA short-sale volume | +0.38% / +0.34% a month, interval spans zero | Not eligible (closest yet) |
 | M17 | Net share issuance | -0.22% / +0.18% a month | Not eligible |
-| M18 | Lazy Prices (10-K risk-factor text) | pending | Pre-registered |
+| M18 | Lazy Prices (10-K risk-factor text) | +0.25% / +0.12% a month, only 45 months in the book | Inconclusive (and nothing close to a pass) |
 
-The pattern across the first seventeen: when something looked like an edge it was usually the market rising, luck that did
+The pattern across the first eighteen: when something looked like an edge it was usually the market rising, luck that did
 not repeat on new stocks, or news that was already in the price at the first open the trader could act on.
