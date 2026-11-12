@@ -54,13 +54,13 @@ All rules are in `deploy/sift_alerts.yml`.
 
 | Alert | Severity | Meaning | First thing to check |
 | --- | --- | --- | --- |
-| `SiftTargetDown` | critical | Prometheus cannot scrape `127.0.0.1:9120` for 2 minutes: the daemon is stopped or crash-looping. | `local_stack status`, then the tail of `data/logs/collect-recorder.log`. A stopped agent restarts with `launchctl kickstart gui/$(id -u)/com.sift.recorder`. |
+| `SiftTargetDown` | critical | Prometheus cannot scrape `127.0.0.1:9120` for 2 minutes: the daemon is stopped or crash-looping. | `local_stack status`, then the tail of `data/logs/collect-recorder.log`. If the agent is loaded but misbehaving, `launchctl kickstart -k gui/$(id -u)/com.sift.recorder` restarts it. kickstart only works on a loaded service: after a `bootout` or `uninstall`, run `local_stack install` instead. |
 | `SiftSourceStale` | warning | A source's last success is older than its allowed age (`sift_source_stale_after_seconds`, derived from its schedule) for 10 minutes. | `python -m tp.collect status`, then the source's error lines in the log. |
 | `SiftSourceErrors` | warning | More than 3 failed runs of one source in an hour. | The error text in `data/logs/collect-recorder.log` (rate limit, changed page layout, network). |
 | `SiftQaFailing` | warning | A QA check has failed for 30 minutes. | The newest `data/qa/<date>.json`: each failed check lists its offending rows. |
 | `SiftQaStale` | warning | The newest scheduled QA report is over two days old, or none exists, for 30 minutes. Only evaluated while the daemon is up, so a stopped daemon pages once (`SiftTargetDown`), not twice. | `launchctl print gui/$(id -u)/com.sift.qa` and `data/logs/collect-qa.log`. It also fires on a fresh install until the first 06:15 run; run `uv run python -m tp.collect qa` once to clear it. |
 | `SiftDiskLow` | warning | Under 10 GB free where `data/` lives. | `df -h data`; free space or move the data directory. |
-| `SiftApifySpendHigh` | warning | Apify spend this month is over $4 (the $5 credit minus headroom). | Set `enabled = false` for `congress_trades` in `config/collect.toml`, restart the agent, and check the Apify console. |
+| `SiftApifySpendHigh` | warning | Apify spend this month is over $4 (the $5 credit minus headroom); the daemon reads it from `data/collect/apify_spend.json` every tick, even while `congress_trades` is disabled (no ledger means 0). | Set `enabled = false` for `congress_trades` in `config/collect.toml`, restart the agent, and check the Apify console. |
 
 ## After the Mac slept
 
@@ -127,14 +127,42 @@ curl -s 'localhost:9090/api/v1/query?query=sift_disk_free_bytes'                
 promtool check rules deploy/sift_alerts.yml
 ```
 
+## Testing the dead-man alert
+
+Do not use `launchctl stop com.sift.recorder`: the agent has KeepAlive, so launchd relaunches it within seconds and
+Prometheus never sees `up == 0`. Freeze the process instead, so the scrape hangs and `up` goes to 0:
+
+```sh
+launchctl kill SIGSTOP gui/$(id -u)/com.sift.recorder     # scrape hangs; SiftTargetDown fires after its 2m `for`
+# ... wait for the Telegram alert (about 3 to 4 minutes) ...
+launchctl kill SIGCONT gui/$(id -u)/com.sift.recorder     # the daemon resumes; the alert resolves by itself
+```
+
+`launchctl bootout gui/$(id -u)/com.sift.recorder` also triggers the alert, but it unloads the agent, so nothing brings
+it back until `uv run python -m tp.collect.tools.local_stack install`. A frozen daemon may also raise `SiftSourceStale`
+for every enabled source once the freeze outlasts their allowed ages; that is expected.
+
+## Crash loops, respawns and alert grouping
+
+- The recorder plist sets `ThrottleInterval` to 30, so a daemon that exits at startup (another instance holds
+  `data/.collect.lock`, a bad config, a crash) is respawned at most every 30 seconds instead of launchd's default 10.
+  Each respawn still writes a traceback to `data/logs/collect-recorder.log`, which is not rotated.
+- There is no Sift equivalent of quantstack's `RecorderCrashLoop` alert: the custom metrics registry has no
+  `process_start_time_seconds`. A crash loop shows up as a log file that keeps growing and as `SiftTargetDown`
+  flapping (down for the `for: 2m`, up again, down). If you see that, read the tail of the log, fix the cause, or run
+  `uninstall`.
+- Alertmanager groups by `alertname` only for these alerts (the other group_by labels do not exist on Sift series), so
+  one `SiftSourceStale` message lists every stale source. A hung but still serving daemon yields one `SiftSourceStale`
+  alert per enabled source, all in that one message.
+
 ## 7-day acceptance checklist
 
-Install, then touch nothing for 7 days. Accepted when all of these hold:
+Install, then touch nothing for 7 days apart from the one deliberate dead-man test. Accepted when all of these hold:
 
 - [ ] `python -m tp.collect status` shows every enabled source fresh (a recent last success, 0 failures).
 - [ ] `data/qa/*.json` has one report per day and no unexplained failure.
-- [ ] A deliberate `launchctl stop com.sift.recorder` produced a Telegram `SiftTargetDown` alert and the daemon came back
-      by itself (launchd restarts it; the alert resolves).
+- [ ] The dead-man path works (see "Testing the dead-man alert" above): a hung daemon produced a Telegram
+      `SiftTargetDown` alert, and after `SIGCONT` the alert resolved and the daemon was healthy again.
 - [ ] No `SiftSourceStale` or `SiftQaStale` alert stayed open without a known cause.
 
 Record the result here, with the dates, when done:

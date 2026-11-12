@@ -1,4 +1,6 @@
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -72,7 +74,8 @@ def test_qa_stale_does_not_double_page_when_the_daemon_is_down():
     assert 'up{job="sift"} == 1' in expr
 
 
-def test_every_alert_metric_exists_in_metrics_module():
+def assert_alert_metrics_exported() -> None:
+    """Every sift_* metric named in an alert expr is exported by Metrics (the one shared implementation)."""
     exported = exported_names()
     used = set()
     for r in rules():
@@ -82,11 +85,30 @@ def test_every_alert_metric_exists_in_metrics_module():
     assert not missing, f"alert expressions use metrics the recorder does not export: {sorted(missing)}"
 
 
+def test_every_alert_metric_exists_in_metrics_module():
+    assert_alert_metrics_exported()
+
+
 def test_expr_metric_names_ignores_strings_and_requires_exact_names():
     assert expr_metric_names('sift_a{x="sift_b"} > sift_c_total') == {"sift_a", "sift_c_total"}
     assert "sift_source_errors" not in expr_metric_names("increase(sift_source_errors_total[1h])")
     assert "sift_source_errors_total" in exported_names()
 
 
-def test_comments_in_the_rule_file_are_not_checked():
-    assert "sift_made_up_metric" not in "".join(r["expr"] for r in rules())
+needs_promtool = pytest.mark.skipif(shutil.which("promtool") is None, reason="promtool is not installed (brew install prometheus)")
+
+
+def promtool(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["promtool", *args], capture_output=True, text=True, timeout=60)
+
+
+@needs_promtool
+def test_promtool_accepts_the_rule_file():
+    result = promtool("check", "rules", str(ALERTS))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@needs_promtool
+def test_promtool_unit_tests_for_the_rules_pass():
+    result = promtool("test", "rules", str(ALERTS.with_name("sift_alerts_test.yml")))
+    assert result.returncode == 0, result.stdout + result.stderr

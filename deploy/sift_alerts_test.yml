@@ -1,0 +1,122 @@
+# Unit tests for sift_alerts.yml. Run: promtool test rules deploy/sift_alerts_test.yml (also run by pytest).
+rule_files:
+  - sift_alerts.yml
+evaluation_interval: 1m
+
+tests:
+  # The on(source) join: a stale enabled source fires, a healthy one does not, and a series with no
+  # sift_source_stale_after_seconds sample (a source the daemon does not know) is dropped.
+  - interval: 1m
+    input_series:
+      - series: 'sift_source_last_success_age_seconds{source="old", job="sift"}'
+        values: '5000+0x40'
+      - series: 'sift_source_stale_after_seconds{source="old", job="sift"}'
+        values: '3600+0x40'
+      - series: 'sift_source_last_success_age_seconds{source="fresh", job="sift"}'
+        values: '100+0x40'
+      - series: 'sift_source_stale_after_seconds{source="fresh", job="sift"}'
+        values: '3600+0x40'
+      - series: 'sift_source_last_success_age_seconds{source="orphan", job="sift"}'
+        values: '99999+0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SiftSourceStale
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SiftSourceStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: old
+            exp_annotations:
+              summary: "Sift source old is stale"
+              description: "old last succeeded 1h 23m 20s ago, past its allowed age. Run `python -m tp.collect status` and check data/logs/collect-recorder.log."
+
+  # SiftQaStale with the daemon up and no QA metric at all: absent() fires after the 30m for clause.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="sift", instance="127.0.0.1:9120"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SiftQaStale
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: SiftQaStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No fresh Sift QA report"
+              description: "The newest scheduled QA report in data/qa/ is over two days old, or none exists yet. Check `launchctl print gui/$(id -u)/com.sift.qa` and data/logs/collect-qa.log. This is expected for the first day after install, until 06:15 has passed once."
+
+  # SiftQaStale with the daemon down: silent (SiftTargetDown pages instead), even though absent() is true.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="sift", instance="127.0.0.1:9120"}'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: SiftQaStale
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: SiftTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: sift
+              instance: "127.0.0.1:9120"
+            exp_annotations:
+              summary: "The Sift recorder is down"
+              description: "Prometheus cannot scrape 127.0.0.1:9120. Run `uv run python -m tp.collect.tools.local_stack status`; launchd restarts the daemon unless it was stopped or keeps crashing (see data/logs/collect-recorder.log)."
+
+  # SiftQaStale with a fresh report: silent.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="sift", instance="127.0.0.1:9120"}'
+        values: '1+0x60'
+      - series: 'sift_qa_report_age_seconds{job="sift", instance="127.0.0.1:9120"}'
+        values: '3600+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: SiftQaStale
+        exp_alerts: []
+
+  # SiftQaStale with an old report and the daemon up: fires.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="sift", instance="127.0.0.1:9120"}'
+        values: '1+0x60'
+      - series: 'sift_qa_report_age_seconds{job="sift", instance="127.0.0.1:9120"}'
+        values: '200000+0x60'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: SiftQaStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: sift
+              instance: "127.0.0.1:9120"
+            exp_annotations:
+              summary: "No fresh Sift QA report"
+              description: "The newest scheduled QA report in data/qa/ is over two days old, or none exists yet. Check `launchctl print gui/$(id -u)/com.sift.qa` and data/logs/collect-qa.log. This is expected for the first day after install, until 06:15 has passed once."
+
+  # up == 0 alone pages SiftTargetDown, and only after its 2m for clause.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="sift", instance="127.0.0.1:9120"}'
+        values: '1 1 0+0x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: SiftTargetDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: SiftTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: sift
+              instance: "127.0.0.1:9120"
+            exp_annotations:
+              summary: "The Sift recorder is down"
+              description: "Prometheus cannot scrape 127.0.0.1:9120. Run `uv run python -m tp.collect.tools.local_stack status`; launchd restarts the daemon unless it was stopped or keeps crashing (see data/logs/collect-recorder.log)."

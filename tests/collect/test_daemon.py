@@ -418,3 +418,35 @@ def test_qa_report_age_is_unset_without_a_report():
     metrics = Metrics(CollectorRegistry())
     run_for(metrics, Clock(), ticks=2)
     assert sample(metrics, "sift_qa_report_age_seconds") is None
+
+
+def write_ledger(text):
+    path = config.DATA_DIR / "collect" / "apify_spend.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_daemon_exports_the_apify_month_total_with_no_source_registered():
+    write_ledger(json.dumps({"months": {"2026-03": 1.25, "2026-02": 3.0}, "days": {}}))
+    metrics = Metrics(CollectorRegistry())
+    run_for(metrics, Clock())
+    assert sample(metrics, "sift_apify_spend_usd_month") == 1.25
+    assert "sift_apify_spend_usd_month 1.25" in generate_latest(metrics.registry).decode()
+
+
+def test_missing_apify_ledger_exports_zero_without_an_error(caplog):
+    metrics = Metrics(CollectorRegistry())
+    run_for(metrics, Clock())
+    assert sample(metrics, "sift_apify_spend_usd_month") == 0.0
+    assert "ledger" not in caplog.text
+
+
+def test_corrupt_apify_ledger_is_logged_each_tick_and_keeps_the_previous_value(caplog):
+    metrics = Metrics(CollectorRegistry())
+    metrics.set_apify_spend(2.5)
+    write_ledger("{not json")
+    with caplog.at_level("WARNING"):
+        run_for(metrics, Clock(), ticks=2)
+    assert sample(metrics, "sift_apify_spend_usd_month") == 2.5
+    warnings = [r for r in caplog.records if "Apify spend ledger" in r.getMessage()]
+    assert len(warnings) == 2 and all(r.levelname == "WARNING" for r in warnings)

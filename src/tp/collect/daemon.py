@@ -16,6 +16,7 @@ from tp.collect import qa, store
 from tp.collect.metrics import Metrics
 from tp.collect.scheduler import Scheduler
 from tp.collect.source import Source
+from tp.collect.sources import congress
 from tp.collect.state import State
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,15 @@ def _update_gauges(metrics: Metrics, sources: list[Source], state: State, now: d
         log.exception("cannot read free disk space for %s", config.DATA_DIR)
 
 
+def _export_apify_spend(metrics: Metrics, now: datetime) -> None:
+    """Set the month's Apify spend from the ledger, read-only and whether or not congress_trades is enabled.
+    A missing ledger is 0.0; an unreadable one is logged and leaves the gauge as it was."""
+    try:
+        metrics.set_apify_spend(congress.SpendLedger(congress.ledger_path()).month_total(now))
+    except Exception as e:
+        log.warning("cannot read the Apify spend ledger, spend gauge left unchanged: %s", e)
+
+
 async def _wait(sleep: Callable[[float], Awaitable[None]], stop: asyncio.Event) -> None:
     """Sleep one tick period, returning early when stop is set."""
     waiters = {asyncio.ensure_future(sleep(TICK_SECONDS)), asyncio.ensure_future(stop.wait())}
@@ -108,6 +118,7 @@ async def run(
                 log.exception("scheduler tick failed")
             now = clock()
             _update_gauges(metrics, sources, state, now, started)
+            _export_apify_spend(metrics, now)
             if qa_exported is None or now - qa_exported >= QA_EXPORT_EVERY:
                 qa_exported = now
                 try:

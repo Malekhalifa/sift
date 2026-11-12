@@ -35,6 +35,7 @@ AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 DEFAULT_PORT = 9120
 QA_AT = (6, 15)
 STOP_GRACE_S = 30  # launchd sends SIGTERM, then SIGKILL after this
+THROTTLE_S = 30  # minimum seconds between respawns of the recorder (launchd's default is 10)
 ALERT_DISK_GB = 10  # SiftDiskLow fires below this
 WARN_DISK_GB = 20
 ENV_REQUIRED = ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY", "SEC_USER_AGENT")
@@ -70,14 +71,25 @@ class Job:
     env: dict[str, str] = field(default_factory=dict)
     daily_at: tuple[int, int] | None = None  # (hour, minute) local time; None = keep running
     process_type: str | None = None
+    throttle_s: int | None = None
 
     @property
     def label(self) -> str:
         return f"{PREFIX}.{self.name}"
 
 
+def metrics_port(repo: Path) -> int:
+    """The port in config/collect.toml [metrics]; DEFAULT_PORT when the file or key is absent."""
+    try:
+        with open(repo / "config" / "collect.toml", "rb") as f:
+            return int(tomllib.load(f)["metrics"]["port"])
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError):
+        return DEFAULT_PORT
+
+
 def default_layout() -> Layout:
-    return Layout(repo=config.ROOT, data_dir=config.ROOT / "data", uv=shutil.which("uv") or "")
+    repo = config.ROOT
+    return Layout(repo=repo, data_dir=repo / "data", uv=shutil.which("uv") or "", port=metrics_port(repo))
 
 
 def _path_env(uv: str) -> str:
@@ -88,9 +100,9 @@ def _path_env(uv: str) -> str:
 def build_jobs(layout: Layout) -> list[Job]:
     """The recorder first, then the QA job."""
     env = {"PATH": _path_env(layout.uv)}
-    base = [layout.uv, "run", "python", "-m", "tp.collect"]
+    base = [layout.uv, "run", "--frozen", "--no-dev", "python", "-m", "tp.collect"]
     return [
-        Job("recorder", [*base, "run"], layout.repo, "collect-recorder.log", env, process_type="Interactive"),
+        Job("recorder", [*base, "run"], layout.repo, "collect-recorder.log", env, process_type="Interactive", throttle_s=THROTTLE_S),
         Job("qa", [*base, "qa"], layout.repo, "collect-qa.log", env, daily_at=QA_AT, process_type="Background"),
     ]
 
@@ -107,6 +119,8 @@ def plist_for(job: Job, log_dir: Path) -> dict[str, Any]:
     }
     if job.process_type is not None:
         plist["ProcessType"] = job.process_type
+    if job.throttle_s is not None:
+        plist["ThrottleInterval"] = job.throttle_s
     if job.daily_at is None:
         plist["RunAtLoad"] = True
         plist["KeepAlive"] = True
@@ -307,7 +321,11 @@ def main(
             print("nothing installed")
         return 0
     if args.command == "uninstall":
-        labels = uninstall(agents_dir, run, sleep)
+        try:
+            labels = uninstall(agents_dir, run, sleep)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         print("removed:", ", ".join(labels) if labels else "nothing installed")
         return 0
     layout = layout or default_layout()

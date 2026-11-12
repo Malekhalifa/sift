@@ -82,7 +82,8 @@ def test_plists_have_keepalive_label_and_working_directory_and_no_secrets(layout
     assert rec["Label"] == "com.sift.recorder"
     assert rec["KeepAlive"] is True and rec["RunAtLoad"] is True
     assert rec["ProcessType"] == "Interactive"
-    assert rec["ProgramArguments"] == [layout.uv, "run", "python", "-m", "tp.collect", "run"]
+    assert rec["ThrottleInterval"] == 30
+    assert rec["ProgramArguments"] == [layout.uv, "run", "--frozen", "--no-dev", "python", "-m", "tp.collect", "run"]
     assert rec["WorkingDirectory"] == str(layout.repo)
     assert rec["StandardOutPath"] == str(layout.data_dir / "logs" / "collect-recorder.log")
     assert rec["StandardErrorPath"] == rec["StandardOutPath"]
@@ -90,8 +91,9 @@ def test_plists_have_keepalive_label_and_working_directory_and_no_secrets(layout
     assert qa["Label"] == "com.sift.qa"
     assert "KeepAlive" not in qa and "RunAtLoad" not in qa
     assert qa["ProcessType"] == "Background"
+    assert "ThrottleInterval" not in qa
     assert qa["StartCalendarInterval"] == {"Hour": 6, "Minute": 15}
-    assert qa["ProgramArguments"] == [layout.uv, "run", "python", "-m", "tp.collect", "qa"]
+    assert qa["ProgramArguments"] == [layout.uv, "run", "--frozen", "--no-dev", "python", "-m", "tp.collect", "qa"]
     assert qa["WorkingDirectory"] == str(layout.repo)
     assert qa["StandardOutPath"] == str(layout.data_dir / "logs" / "collect-qa.log")
 
@@ -103,7 +105,8 @@ def test_plists_have_keepalive_label_and_working_directory_and_no_secrets(layout
             assert banned not in text
 
 
-def test_dry_run_writes_nothing_and_loads_nothing(layout, agents, capsys):
+def test_dry_run_writes_nothing_and_loads_nothing(layout, agents, capsys, monkeypatch):
+    monkeypatch.setattr(ls, "_free_gb", lambda p: 500.0)
     run = FakeLaunchctl()
     code = ls.main(
         ["install", "--dry-run"], agents_dir=agents, run=run, layout=layout, port_free=lambda p: True, sleep=lambda s: None
@@ -182,6 +185,20 @@ def test_uninstall_removes_plists_but_leaves_data(layout, agents):
     assert run.loaded == set()
 
 
+def test_uninstall_reports_an_agent_that_will_not_stop_and_exits_1(layout, agents, capsys, monkeypatch):
+    monkeypatch.setattr(ls, "_free_gb", lambda p: 500.0)
+    ls.install(layout, agents_dir=agents, run=FakeLaunchctl(), sleep=lambda s: None, port_free=lambda p: True)
+
+    def stuck(args):
+        return subprocess.CompletedProcess(list(args), 0, "state = running\n", "")
+
+    code = ls.main(["uninstall"], agents_dir=agents, run=stuck, sleep=lambda s: None)
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "error:" in err and "com.sift.recorder" in err and "Traceback" not in err
+    assert (agents / "com.sift.recorder.plist").exists()
+
+
 def test_uninstall_with_nothing_installed_is_a_noop(agents):
     run = FakeLaunchctl()
     assert ls.uninstall(agents_dir=agents, run=run, sleep=lambda s: None) == []
@@ -197,7 +214,8 @@ def test_status_reports_each_installed_agent(layout, agents):
     assert rows["com.sift.qa"] == "not loaded"
 
 
-def test_preflight_clean_layout_has_no_errors(layout, agents):
+def test_preflight_clean_layout_has_no_errors(layout, agents, monkeypatch):
+    monkeypatch.setattr(ls, "_free_gb", lambda p: 500.0)
     errors, warnings = ls.preflight(layout, agents_dir=agents, port_free=lambda p: True)
     assert errors == []
 
@@ -274,3 +292,29 @@ def test_port_is_free_detects_a_listener():
         s.bind(("127.0.0.1", 0))
         free = s.getsockname()[1]
     assert ls.port_is_free(free) is True
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_metrics_port_comes_from_collect_toml(layout, agents):
+    import tomllib
+
+    configured = tomllib.loads((REPO_ROOT / "config" / "collect.toml").read_text())["metrics"]["port"]
+    assert ls.metrics_port(REPO_ROOT) == configured
+    assert ls.default_layout().port == configured
+    assert ls.metrics_port(layout.repo) == 9120  # no config file: the default
+
+    (layout.repo / "config").mkdir()
+    (layout.repo / "config" / "collect.toml").write_text("[metrics]\nport = 9555\n")
+    custom = ls.Layout(repo=layout.repo, data_dir=layout.data_dir, uv=layout.uv, port=ls.metrics_port(layout.repo))
+    errors, _ = ls.preflight(custom, agents_dir=agents, port_free=lambda p: False)
+    assert any("9555" in e for e in errors)
+
+
+def test_alert_rules_and_runbook_target_the_configured_metrics_port():
+    import tomllib
+
+    port = tomllib.loads((REPO_ROOT / "config" / "collect.toml").read_text())["metrics"]["port"]
+    assert f"127.0.0.1:{port}" in (REPO_ROOT / "docs" / "recorder-runbook.md").read_text()
+    assert f"127.0.0.1:{port}" in (REPO_ROOT / "deploy" / "sift_alerts.yml").read_text()

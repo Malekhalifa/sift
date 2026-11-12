@@ -4,11 +4,12 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-import yaml
 from prometheus_client import CollectorRegistry, generate_latest
 
 from tp.collect.metrics import Metrics
 from tp.collect.scheduler import RunResult
+
+from .test_alerts import assert_alert_metrics_exported
 
 ALERTS = Path(__file__).resolve().parents[2] / "deploy" / "sift_alerts.yml"
 
@@ -161,21 +162,7 @@ def test_serve_on_a_busy_port_raises_a_clear_error(metrics):
         other.close()
 
 
-def test_metric_names_match_the_alert_rules(metrics, registry):
+def test_metric_names_match_the_alert_rules():
     if not ALERTS.exists():
-        pytest.skip(f"{ALERTS} does not exist yet (created in Task 15)")
-    metrics.record_run(RunResult("x", True, 0, 0.0, None))
-    metrics.record_run(RunResult("x", False, 0, 0.0, "e"))
-    metrics.set_age("x", 0)
-    metrics.set_stale_after("x", 0)
-    metrics.set_qa("x", "c", 0)
-    metrics.set_qa_report_age(0)
-    metrics.set_disk_free(0)
-    metrics.set_apify_spend(0)
-    exported = set(re.findall(r"^(sift_\w+?)(?:\{| )", generate_latest(registry).decode(), re.M))
-    doc = yaml.safe_load(ALERTS.read_text())
-    exprs = [rule["expr"] for group in doc["groups"] for rule in group["rules"]]
-    used = {n for expr in exprs for n in re.findall(r"\bsift_[a-z0-9_]+", re.sub(r'"[^"]*"', '""', expr))}
-    assert used, "no sift_* metric found in any alert expr"
-    missing = used - exported
-    assert not missing, f"alert rules use metrics the recorder does not export: {sorted(missing)}"
+        pytest.skip(f"{ALERTS} does not exist")
+    assert_alert_metrics_exported()
