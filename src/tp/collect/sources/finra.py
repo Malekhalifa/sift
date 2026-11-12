@@ -47,7 +47,6 @@ HOLIDAY_FALLBACK_DAYS = 4  # a settlement date on a market holiday is filed unde
 RETRY_AFTER_S = 600
 RETRIES = 4
 RETRY_PAUSE_S = 0.5  # between tries of one file after a transport error or an unexpected status
-RECHECK_DAYS = 7  # short volume: every weekday this far back that is not stored is probed again
 NO_FILE_TRUST_DAYS = 5  # short volume: a recorded no-file day is believed only once it is this old
 STREAK_OLD_DAYS = 10  # short volume: a day this old should certainly have a file
 SHORTVOL_STREAK = 5  # consecutive old days without a file, after a hit in the same run, that stop the run
@@ -224,6 +223,33 @@ class _FinraSource(Source):
         return added
 
 
+def _run_ending_at(order: list[date], position: dict[date, int], hit: set[date], item: date) -> int:
+    """How many consecutive entries of `order` up to and including `item` are not hits."""
+    i, n = position[item], 0
+    while i >= 0 and order[i] not in hit:
+        n += 1
+        i -= 1
+    return n
+
+
+def _confirmed(order: list[date], hit: set[date], misses: set[date], limit: int) -> set[date]:
+    """The probed `misses` that a later hit confirms as absent: the run of non-hits around them is shorter than `limit` and
+    is followed by a hit. A trailing run, or a run of `limit` or more (a block rather than a holiday), is never confirmed."""
+    out: set[date] = set()
+    i = 0
+    while i < len(order):
+        if order[i] in hit:
+            i += 1
+            continue
+        j = i
+        while j < len(order) and order[j] not in hit:
+            j += 1
+        if j - i < limit and j < len(order):
+            out.update(d for d in order[i:j] if d in misses)
+        i = j
+    return out
+
+
 def _no_file_path() -> Path:
     return config.DATA_DIR / "finra" / "no_file.txt"
 
@@ -235,11 +261,19 @@ def _empty_shortvol() -> pd.DataFrame:
     return out
 
 
+def _stored_dates(ds: Dataset, column: str) -> set[date]:
+    stored = _stored_column(ds, column)
+    return set() if stored is None else {t.date() for t in pd.to_datetime(stored).dropna().unique()}
+
+
 class FinraShortVolume(_FinraSource):
-    """Daily short volume for the universe. Each run probes the weekdays after the stored maximum date up to yesterday (ET),
-    so a file is never asked for before FINRA has had a day to post it, and also every stored-date gap in the last
-    RECHECK_DAYS days: a day that answered 403 once and was filled in later is not lost. A recorded no-file day is skipped
-    only when it is at least NO_FILE_TRUST_DAYS old."""
+    """Daily short volume for the universe. Each run probes every weekday from the first stored date up to yesterday (ET)
+    that is neither stored nor a trusted no-file day, so a file is never asked for before FINRA has had a day to post it, and
+    a day that answered 403 once and was filled in later is not lost.
+
+    An absence is recorded in no_file.txt only when a later day has a file (stored or read in this run) and fewer than
+    SHORTVOL_STREAK weekdays in a row are missing around it, so a block or a late post is never made permanent. A
+    recorded day is skipped only when it is at least NO_FILE_TRUST_DAYS old."""
 
     name = "finra_shortvol"
 
@@ -252,10 +286,8 @@ class FinraShortVolume(_FinraSource):
         super().__init__(schedule, lag_minutes, http_factory)
         self.datasets = (datasets.dataset("finra_shortvol"),)
 
-    def _days(self, today: date) -> list[date]:
-        stored = _stored_column(self.datasets[0], "date")
-        have: set[date] = set() if stored is None else {t.date() for t in pd.to_datetime(stored).dropna().unique()}
-        start = FIRST if not have else max(FIRST, min(max(have) + timedelta(days=1), today - timedelta(days=RECHECK_DAYS)))
+    def _days(self, today: date, have: set[date]) -> list[date]:
+        start = FIRST if not have else max(FIRST, min(have))
         known = read_days(_no_file_path())
         trusted = {d for d in _weekdays(start, today) if f"{d:%Y%m%d}" in known and (today - d).days >= NO_FILE_TRUST_DAYS}
         return [d for d in _weekdays(start, today - timedelta(days=1)) if d not in have and d not in trusted]
@@ -264,44 +296,47 @@ class FinraShortVolume(_FinraSource):
         self, ctx: RunContext, flush: Callable[[pd.DataFrame], None]
     ) -> tuple[pd.DataFrame, SourceError | None]:
         today = _et_date(ctx.now)
-        days = self._days(today)
+        have = _stored_dates(self.datasets[0], "date")
+        days = self._days(today, have)
         if not days:
             return _empty_shortvol(), None
+        order = _weekdays(FIRST, today - timedelta(days=1))
+        position = {d: i for i, d in enumerate(order)}
         symbols = universe_symbols()
         parts: list[pd.DataFrame] = []
-        found: set[str] = set()
-        absent: set[str] = set()
-        streak: list[date] = []  # days without a file since the last hit; recorded only once a later day has one
+        hit = set(have)
+        misses: set[date] = set()
         error: SourceError | None = None
         http = self._http_factory()
         try:
             for day in days:
-                df = fetch_day(http, day, symbols)
+                try:
+                    df = fetch_day(http, day, symbols)
+                except (FinraUnavailable, httpx.HTTPError, ValueError, KeyError) as e:
+                    error = _failure(e, "short volume download")
+                    break
                 if df is not None:
                     parts.append(df)
-                    found.add(f"{day:%Y%m%d}")
-                    absent.update(f"{d:%Y%m%d}" for d in streak)
-                    streak = []
+                    hit.add(day)
                     continue
-                streak.append(day)
-                old = [d for d in streak if (today - d).days > STREAK_OLD_DAYS]
-                if parts and len(old) >= SHORTVOL_STREAK:
+                misses.add(day)
+                streak = _run_ending_at(order, position, hit, day)
+                if parts and streak >= SHORTVOL_STREAK and (today - day).days > STREAK_OLD_DAYS:
+                    first = order[position[day] - streak + 1]
                     error = SourceError(
-                        f"finra_shortvol: {len(old)} consecutive days {old[0]:%Y%m%d} to {old[-1]:%Y%m%d} have no file "
-                        "after earlier days in this run did; not recording them (a proxy or block?)"
+                        f"finra_shortvol: {streak} consecutive days {first:%Y%m%d} to {day:%Y%m%d} have no file after "
+                        "earlier days in this run did; not recording them (a proxy or block?)"
                     )
                     break
-            else:
-                absent.update(f"{d:%Y%m%d}" for d in streak)
-        except (FinraUnavailable, httpx.HTTPError, ValueError, KeyError) as e:
-            error = _failure(e, "short volume download")
         finally:
             if isinstance(http, httpx.Client):
                 http.close()
+            confirmed = _confirmed(order, hit, misses, SHORTVOL_STREAK)
             known = read_days(_no_file_path())
-            if (known - found) | absent != known:
-                write_days(_no_file_path(), (known - found) | absent)
-        log.info("finra_shortvol: %d days asked for, %d read, %d without a file", len(days), len(parts), len(absent))
+            updated = (known - {f"{d:%Y%m%d}" for d in hit}) | {f"{d:%Y%m%d}" for d in confirmed}
+            if updated != known:
+                write_days(_no_file_path(), updated)
+        log.info("finra_shortvol: %d days asked for, %d read, %d without a file", len(days), len(parts), len(confirmed))
         if not parts:
             return _empty_shortvol(), error
         frame = pd.concat(parts, ignore_index=True)
@@ -328,8 +363,10 @@ def fetch_short_interest(http: httpx.Client, day: date, symbols: set[str]) -> pd
 
 class FinraShortInterest(_FinraSource):
     """Biweekly short interest. A settlement date is requested once it is MIN_AGE_BUSINESS_DAYS business days old and again
-    on every run until its file turns up; only a date at least STALE_AGE_BUSINESS_DAYS old is recorded as having no file.
-    Each file is cut to the universe as it is read, and the rows are stored in batches of WRITE_EVERY files."""
+    on every run until its file turns up. It is recorded in short_interest_no_file.txt only when it is at least
+    STALE_AGE_BUSINESS_DAYS old, a later settlement date has a file (stored or read in this run) and fewer than
+    INTEREST_STREAK dates in a row are missing around it. Each file is cut to the universe as it is read, and the rows are
+    stored in batches of WRITE_EVERY files."""
 
     name = "finra_short_interest"
 
@@ -342,38 +379,27 @@ class FinraShortInterest(_FinraSource):
         super().__init__(schedule, lag_minutes, http_factory)
         self.datasets = (datasets.dataset("finra_short_interest"),)
 
-    def _due(self, today: date) -> list[date]:
-        stored = _stored_column(self.datasets[0], "settlement_date")
-        have = set() if stored is None else {t.date() for t in pd.to_datetime(stored).dropna().unique()}
-        due = [
-            d for d in settlement_dates(FIRST_SETTLEMENT, today)
-            if int(np.busday_count(d, today)) >= MIN_AGE_BUSINESS_DAYS
-        ]
-        return [d for d in due if not have.intersection(_candidates(d))]
+    def _state(self, today: date) -> tuple[list[date], set[date], list[date]]:
+        """Every settlement date so far, those already stored, and those to request now."""
+        order = settlement_dates(FIRST_SETTLEMENT, today)
+        have = _stored_dates(self.datasets[0], "settlement_date")
+        done = {d for d in order if have.intersection(_candidates(d))}
+        due = [d for d in order if d not in done and int(np.busday_count(d, today)) >= MIN_AGE_BUSINESS_DAYS]
+        return order, done, due
 
     def _gather(
         self, ctx: RunContext, flush: Callable[[pd.DataFrame], None]
     ) -> tuple[pd.DataFrame, SourceError | None]:
         today = _et_date(ctx.now)
-        due = self._due(today)
+        order, hit, due = self._state(today)
         if not due:
             return pd.DataFrame(), None
+        position = {d: i for i, d in enumerate(order)}
         symbols = universe_symbols()
         known = read_days(_short_interest_no_file_path())
-        absent: set[str] = set()
+        tried_days: dict[date, list[date]] = {}
         parts: list[pd.DataFrame] = []
         read = 0
-        streak: list[tuple[date, list[date]]] = []  # dates without a file since the last hit, with the days tried
-
-        def record(misses: list[tuple[date, list[date]]]) -> None:
-            for settlement, tried in misses:
-                if int(np.busday_count(settlement, today)) >= STALE_AGE_BUSINESS_DAYS:
-                    absent.update(f"{d:%Y%m%d}" for d in tried)
-                    log.warning(
-                        "finra_short_interest: no file for %s (tried %s); not retrying",
-                        settlement, ", ".join(f"{d:%Y%m%d}" for d in tried),
-                    )
-
         error: SourceError | None = None
         http = self._http_factory()
         try:
@@ -381,35 +407,43 @@ class FinraShortInterest(_FinraSource):
                 tried = [d for d in _candidates(settlement) if f"{d:%Y%m%d}" not in known]
                 if not tried:
                     continue
-                hit = None
-                for day in tried:
-                    hit = fetch_short_interest(http, day, symbols)
-                    if hit is not None:
-                        break
-                if hit is None:
-                    streak.append((settlement, tried))
-                    if read and len(streak) >= INTEREST_STREAK:
+                found = None
+                try:
+                    for day in tried:
+                        found = fetch_short_interest(http, day, symbols)
+                        if found is not None:
+                            break
+                except (FinraUnavailable, httpx.HTTPError, ValueError, KeyError) as e:
+                    error = _failure(e, "short interest download")
+                    break
+                if found is None:
+                    tried_days[settlement] = tried
+                    streak = _run_ending_at(order, position, hit, settlement)
+                    if read and streak >= INTEREST_STREAK:
                         error = SourceError(
-                            f"finra_short_interest: {len(streak)} consecutive settlement dates "
-                            f"{streak[0][0]:%Y%m%d} to {streak[-1][0]:%Y%m%d} have no file after earlier dates in this run "
-                            "did; not recording them (a proxy or block?)"
+                            f"finra_short_interest: {streak} consecutive settlement dates "
+                            f"{order[position[settlement] - streak + 1]:%Y%m%d} to {settlement:%Y%m%d} have no file after "
+                            "earlier dates in this run did; not recording them (a proxy or block?)"
                         )
                         break
                     continue
-                record(streak)
-                streak = []
-                parts.append(hit)
+                hit.add(settlement)
+                parts.append(found)
                 read += 1
                 if len(parts) >= WRITE_EVERY:
                     flush(pd.concat(parts, ignore_index=True))
                     parts = []
-            else:
-                record(streak)
-        except (FinraUnavailable, httpx.HTTPError, ValueError, KeyError) as e:
-            error = _failure(e, "short interest download")
         finally:
             if isinstance(http, httpx.Client):
                 http.close()
+            absent: set[str] = set()
+            for settlement in _confirmed(order, hit, set(tried_days), INTEREST_STREAK):
+                if int(np.busday_count(settlement, today)) >= STALE_AGE_BUSINESS_DAYS:
+                    absent.update(f"{d:%Y%m%d}" for d in tried_days[settlement])
+                    log.warning(
+                        "finra_short_interest: no file for %s (tried %s); not retrying",
+                        settlement, ", ".join(f"{d:%Y%m%d}" for d in tried_days[settlement]),
+                    )
             if absent:
                 write_days(_short_interest_no_file_path(), known | absent)
         log.info("finra_short_interest: %d settlement dates due, %d files read", len(due), read)

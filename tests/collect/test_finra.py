@@ -208,12 +208,20 @@ def test_shortvol_without_a_stored_file_starts_at_the_first_consolidated_day(mon
     assert http.urls == [sv_url(d) for d in ("20261109", "20261110", "20261111")]
 
 
-def test_shortvol_records_no_file_days(tmp_path):
-    store_through("20261109")
-    http = FakeHttp({})  # 20261110 and 20261111 answer 403
-    assert shortvol(http).run(ctx()) == 0
-    assert gaps("no_file.txt") == {"20261110", "20261111"}
+def test_shortvol_records_a_no_file_day_that_a_later_day_confirms():
+    store_through("20261111", missing=("20261106",))  # Fri 6th has no file, Mon 9th onward is stored
+    assert shortvol(FakeHttp({})).run(ctx()) == 0
+    assert gaps("no_file.txt") == {"20261106"}
     assert not list((config.DATA_DIR / "finra").glob("*.tmp"))
+    again = FakeHttp({})
+    shortvol(again).run(ctx())
+    assert again.urls == []  # six days old: believed
+
+
+def test_shortvol_does_not_record_a_trailing_miss():
+    store_through("20261109")
+    shortvol(FakeHttp({})).run(ctx())  # 10th and 11th answer 403 and nothing later has a file
+    assert gaps("no_file.txt") == set()
 
 
 def test_shortvol_reprobes_a_day_that_failed_once_after_a_later_day_succeeded():
@@ -240,11 +248,14 @@ def test_shortvol_trusts_recorded_no_file_days_only_from_five_days_old():
     assert gaps("no_file.txt") == {"20261106"}
 
 
-def test_shortvol_only_probes_the_recent_window_for_stored_gaps():
-    store_through("20261111", missing=("20261103",), first="20261102")  # gap older than the 7-day window
+def test_shortvol_probes_an_old_stored_gap_once_and_then_believes_the_record():
+    store_through("20261111", missing=("20261103",), first="20261102")
     http = FakeHttp({})
     shortvol(http).run(ctx())
-    assert http.urls == []
+    assert http.urls == [sv_url("20261103")] and gaps("no_file.txt") == {"20261103"}
+    again = FakeHttp({})
+    shortvol(again).run(ctx())
+    assert again.urls == []
 
 
 def test_shortvol_breaker_stops_and_records_nothing_when_files_stop_appearing():
@@ -259,12 +270,44 @@ def test_shortvol_breaker_stops_and_records_nothing_when_files_stop_appearing():
     assert [c[1]["date"].dt.strftime("%Y%m%d").unique().tolist() for c in calls] == [["20261002"]]
 
 
-def test_shortvol_breaker_does_not_trip_on_a_holiday_gap_followed_by_a_hit():
+def test_shortvol_a_block_is_not_recorded_by_the_retry_that_follows_the_breaker():
     store_through("20261001", first="20260901")
-    open_days = [f"{d:%Y%m%d}" for d in pd.bdate_range("2026-10-02", "2026-11-11") if f"{d:%Y%m%d}" not in ("20261005", "20261006", "20261007")]
-    http = FakeHttp({sv_url(d): sv_text(d) for d in open_days})
-    shortvol(http).run(ctx())  # 5th..7th are 403 but later days have files: a plausible closure, recorded
-    assert gaps("no_file.txt") >= {"20261005", "20261006", "20261007"}
+    blocked = FakeHttp({sv_url("20261002"): sv_text("20261002")})
+    with pytest.raises(SourceError):
+        shortvol(blocked).run(ctx())
+    assert pd.read_parquet(datasets.dataset("finra_shortvol").path)["date"].max() == pd.Timestamp("2026-10-02")
+    for _ in range(2):  # the retry starts inside the streak, with the block still on
+        retry = FakeHttp({})
+        shortvol(retry).run(ctx())
+        assert retry.urls[0] == sv_url("20261005")
+        assert gaps("no_file.txt") == set()
+
+
+def test_shortvol_a_streak_of_five_is_not_recorded_even_when_a_later_day_has_a_file():
+    store_through("20261002", first="20260901")
+    blocked = ("20261005", "20261006", "20261007", "20261008", "20261009", "20261012")  # six weekdays
+    later = [f"{d:%Y%m%d}" for d in pd.bdate_range("2026-10-13", "2026-11-11")]
+    http = FakeHttp({sv_url(d): sv_text(d) for d in later})
+    shortvol(http).run(ctx())
+    assert gaps("no_file.txt") == set()
+    again = FakeHttp({})
+    shortvol(again).run(ctx())
+    assert again.urls == [sv_url(d) for d in blocked]  # asked for again until the block lifts
+
+
+def test_shortvol_records_a_holiday_gap_of_one_to_four_weekdays_between_hits():
+    store_through("20261001", first="20260901")
+    shut = ("20261005", "20261006", "20261007", "20261008")
+    open_days = [f"{d:%Y%m%d}" for d in pd.bdate_range("2026-10-02", "2026-11-11") if f"{d:%Y%m%d}" not in shut]
+    shortvol(FakeHttp({sv_url(d): sv_text(d) for d in open_days})).run(ctx())
+    assert gaps("no_file.txt") == set(shut)
+
+
+def test_shortvol_records_a_two_day_gap_after_a_stored_hit_and_before_a_later_one():
+    store_through("20261001", first="20260901")
+    open_days = [f"{d:%Y%m%d}" for d in pd.bdate_range("2026-10-02", "2026-11-11") if f"{d:%Y%m%d}" not in ("20261008", "20261009")]
+    shortvol(FakeHttp({sv_url(d): sv_text(d) for d in open_days})).run(ctx())
+    assert gaps("no_file.txt") == {"20261008", "20261009"}
 
 
 def test_shortvol_transport_error_is_a_source_error_and_not_a_no_file_day():
@@ -410,7 +453,7 @@ def test_short_interest_does_not_record_a_missing_file_before_it_is_stale(from_s
     assert again.urls == [si_url("20261015")]
 
 
-def test_short_interest_records_a_missing_file_once_it_is_stale(from_sep, caplog):
+def test_short_interest_records_a_missing_file_once_it_is_stale_and_a_later_date_has_one(from_sep, caplog):
     http = FakeHttp({si_url("20261015"): si_text("20261015")})  # 20260930 is 30 business days old and answers 403
     with caplog.at_level(logging.WARNING):
         assert interest(http).run(ctx()) == 2
@@ -423,10 +466,44 @@ def test_short_interest_records_a_missing_file_once_it_is_stale(from_sep, caplog
 
 @pytest.mark.parametrize(("settlement", "recorded"), [(date(2026, 10, 8), True), (date(2026, 10, 9), False)])
 def test_short_interest_staleness_threshold_is_25_business_days(monkeypatch, settlement, recorded):
-    monkeypatch.setattr(finra, "settlement_dates", lambda first, last: [settlement])
+    later = date(2026, 10, 15)
+    monkeypatch.setattr(finra, "settlement_dates", lambda first, last: [settlement, later])
     assert int(np.busday_count(settlement, date(2026, 11, 12))) == (25 if recorded else 24)
-    interest(FakeHttp({})).run(ctx())
+    interest(FakeHttp({si_url("20261015"): si_text("20261015")})).run(ctx())
     assert bool(gaps("short_interest_no_file.txt")) is recorded
+
+
+def dates_in(*days: date):
+    return lambda first, last: list(days)
+
+
+JAN_FEB = [date(2026, 1, 15), date(2026, 1, 30), date(2026, 2, 13), date(2026, 2, 27)]  # all well over 25 business days old
+
+
+def serve(*days: date) -> FakeHttp:
+    return FakeHttp({si_url(f"{d:%Y%m%d}"): si_text(f"{d:%Y%m%d}") for d in days})
+
+
+def test_short_interest_three_missing_dates_before_a_hit_are_not_recorded(monkeypatch):
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(*JAN_FEB))
+    interest(serve(JAN_FEB[3])).run(ctx())
+    assert gaps("short_interest_no_file.txt") == set()
+    again = serve()
+    interest(again).run(ctx())
+    assert len(again.urls) == 12  # all three are asked for again (four candidate days each)
+
+
+@pytest.mark.parametrize("missing", [1, 2])
+def test_short_interest_one_or_two_missing_dates_before_a_hit_are_recorded(monkeypatch, missing):
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(*JAN_FEB[: missing + 1]))
+    interest(serve(JAN_FEB[missing])).run(ctx())
+    assert len(gaps("short_interest_no_file.txt")) == 4 * missing
+
+
+def test_short_interest_a_trailing_missing_date_is_not_recorded(monkeypatch):
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(*JAN_FEB[:2]))
+    interest(serve(JAN_FEB[0])).run(ctx())
+    assert gaps("short_interest_no_file.txt") == set()
 
 
 def test_short_interest_breaker_stops_and_records_nothing_when_files_stop_appearing(monkeypatch):
@@ -441,10 +518,25 @@ def test_short_interest_breaker_stops_and_records_nothing_when_files_stop_appear
     assert si_url("20260313") not in http.urls
 
 
-def test_short_interest_without_an_earlier_hit_does_not_trip_the_breaker(monkeypatch):
-    monkeypatch.setattr(finra, "settlement_dates", lambda first, last: [date(2026, 1, 15), date(2026, 1, 30), date(2026, 2, 13)])
-    interest(FakeHttp({})).run(ctx())
-    assert len(gaps("short_interest_no_file.txt")) == 12
+def test_short_interest_breaker_retry_inside_the_streak_records_nothing(monkeypatch):
+    monkeypatch.setattr(finra, "settlement_dates", dates_in(*JAN_FEB))
+    with pytest.raises(SourceError):
+        interest(serve(JAN_FEB[0])).run(ctx())
+    for _ in range(2):
+        interest(FakeHttp({})).run(ctx())  # no hit in the run: no error, and nothing is recorded
+        assert gaps("short_interest_no_file.txt") == set()
+
+
+def test_short_interest_writer_errors_propagate_unchanged(from_sep, monkeypatch):
+    class Boom(Exception):
+        pass
+
+    def writer(ds, df):
+        raise Boom
+
+    monkeypatch.setattr(finra, "WRITE_EVERY", 1)
+    with pytest.raises(Boom):
+        interest(serve(date(2026, 9, 30), date(2026, 10, 15))).run(ctx(writer))
 
 
 def test_short_interest_writes_in_batches_of_write_every(monkeypatch):
